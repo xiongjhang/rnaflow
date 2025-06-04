@@ -35,4 +35,4 @@ TODO
 
 ## License
 
-[Apache](https://github.com/xiongjhang/wanlab-code?tab=Apache-2.0-1-ov-file#readme)
+MIT
