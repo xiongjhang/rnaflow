@@ -40,3 +40,11 @@ def uint8_to_uint16(uint8_array):
     uint16_array = scaled_array.astype(np.uint16)
 
     return uint16_array
+
+def preprocess_sr(img: np.ndarray, img_ref: np.ndarray) -> np.ndarray:
+    '''Refactor by sunrui version'''
+    assert img.ndim == 2, f"Input image must be a 2D array, got shape {img.shape}"
+    assert img_ref.ndim == 2, f"Reference image must be a 2D array, got shape {img_ref.shape}"
+    img = hist_match(img, img_ref)
+    img = uint8_to_uint16(img)
+    return img

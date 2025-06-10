@@ -2,10 +2,34 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
-from typing import Union
+from typing import Union, List, Tuple, Optional
+import logging
+import sys
 
 from tqdm.auto import tqdm
 import tifffile as tiff
+
+# region logging
+
+loggers = {}
+
+def get_logger(name, level=logging.INFO):
+    global loggers
+    if loggers.get(name) is not None:
+        return loggers[name]
+    else:
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        # Logging to console
+        stream_handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            '%(asctime)s [%(threadName)s] %(levelname)s %(name)s - %(message)s')
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        loggers[name] = logger
+
+        return logger
 
 # region stack functions
 
@@ -16,7 +40,7 @@ def print_stack_info(stack: Union[np.ndarray, Path, str]):
     print(f'strack shape: {stack.shape}')
     print(f'strack dtype: {stack.dtype}')
 
-def stack_to_frames(input_data, output_dir):
+def stack_to_frames(input_data, output_dir, prefix='t'):
     '''Convert a 3D NumPy array or a TIFF file into individual TIFF frames and save them to a specified directory.
 
     Args:
@@ -33,13 +57,13 @@ def stack_to_frames(input_data, output_dir):
         print("Using provided NumPy array as input.")
         tif_data = input_data
     else:
-        raise ValueError("输入必须是文件路径（字符串）或三维 NumPy 数组。")
+        raise ValueError("input_data must be a file path (str or Path) or a 3D NumPy array.")
     
     if tif_data.ndim != 3:
-        raise ValueError(f"输入数据必须是三维数组，形状为 (num_frames, height, width)。{tif_data.shape}")
+        raise ValueError(f"input_data must be a 3D array, got shape {tif_data.shape}")
 
     for i, frame in tqdm(enumerate(tif_data), desc="Saving frames", unit="frame"):
-        frame_filename = f"t{i:04d}.tif"
+        frame_filename = f"{prefix}{i:04d}.tif"
         frame_path = os.path.join(output_dir, frame_filename)
         
         tiff.imwrite(frame_path, frame)
@@ -121,3 +145,28 @@ class Predictor(ABC):
         This method should be called after tracking to finalize the results.
         """
         raise NotImplementedError("This method should be overridden by subclasses.")
+
+
+def map_fn_to_frames(imgs_path_list: List[Path], fn, save_dir: Path, save_prefix: str = 't', **kwargs) -> List:
+    """
+    Apply a function to each frame in a list of image paths.
+    
+    Args:
+        imgs_path_list (List[Path]): List of paths to the image frames.
+        fn (callable): Function to apply to each frame.
+    
+    Returns:
+        List: List of results after applying the function to each frame.
+    """
+    num_frames = len(imgs_path_list)
+    results = []
+    for i, img_path in tqdm(enumerate(imgs_path_list), total=num_frames, desc='Processing frames', unit="frame"):
+        img = tiff.imread(img_path)
+        result = fn(img, **kwargs)
+        if save_dir is not None:
+            if not save_dir.exists():
+                save_dir.mkdir(parents=True, exist_ok=True)
+            save_path = save_dir / f'{save_prefix}_{i:04d}.tif'
+            tiff.imwrite(save_path, result)
+        results.append(result)
+    return results  

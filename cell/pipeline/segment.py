@@ -131,7 +131,6 @@ def load_segmentor(device='cuda'):
     predictor = SamPredictor(sam)
     return predictor
 
-
 def array_to_rgb(array):
     bgr_array = cv2.cvtColor(array, cv2.COLOR_GRAY2BGR)
     rgb_array = cv2.cvtColor(bgr_array, cv2.COLOR_BGR2RGB)
@@ -186,7 +185,7 @@ def run_segment_with_bbox(predictor, img_pre: np.ndarray, bbox: np.ndarray):
     if scores[0] < 0.05:
         return None
     num_pixels = np.sum(masks[0])
-    thresholdU = 20000000000000                            
+    thresholdU = 20000000000000                  
     thresholdD = 6                                       
     if num_pixels > thresholdU or num_pixels < thresholdD :
         return None
@@ -300,3 +299,12 @@ def segment_postprocess_fn(mask: np.ndarray):
                 mask_post += post_result
 
     return mask_post
+
+def gray_to_rgb(img: np.ndarray, min_value: int, max_value: int) -> np.ndarray:
+    if img.dtype == np.uint16:
+        img = uint16_to_uint8_maxmin(img, min_value, max_value)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    return rgb_img
+
+def segment_sr(img_rgb: np.ndarray, img_pre: np.ndarray, detector, sam_predictor, device: str) -> np.ndarray:
+    pass
