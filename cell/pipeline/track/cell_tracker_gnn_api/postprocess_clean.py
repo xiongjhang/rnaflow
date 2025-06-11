@@ -4,6 +4,7 @@ import torch
 import pandas as pd
 import numpy as np
 from skimage import io
+import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 import imageio
@@ -79,6 +80,7 @@ class Postprocess(object):
                 new_col = -2 * np.ones((all_frames_traject.shape[0], 1), dtype=all_frames_traject.dtype)
                 all_frames_traject = np.append(all_frames_traject, new_col, axis=1)
                 ind_place = np.argwhere(all_frames_traject[frame_ind, :] == -2)
+                stp=2
             ind_place = ind_place.min()
             all_frames_traject[frame_ind, ind_place] = curr_node
             if frame_ind + 1 < all_frames_traject.shape[0]:
@@ -101,11 +103,19 @@ class Postprocess(object):
         df_parent = pd.DataFrame(index=range(len(cell_starts)), columns=self.cols)
         df_parent.loc[:, "start_frame"] = frame_ind
 
+        # TODO: handle odd number of mitosis
+        # if len(cell_starts) == 1 and finish_node_ids.shape[0] == 1:
+        #     # case of wrong end for trajectory ->
+        #     # -> fix the trajectory using assigning in all_frames_traject
+        #     stp = 2
+        #     return pd.DataFrame(columns=self.cols)
+        # elif finish_node_ids.shape[0] != 0:
         if finish_node_ids.shape[0] != 0:
             if self.is_3d:
                 finish_cell = df.loc[finish_node_ids, ["centroid_depth", "centroid_row", "centroid_col"]].values
             else:
                 finish_cell = df.loc[finish_node_ids, ["centroid_row", "centroid_col"]].values
+            str_match = ''      #  f'frame_ind: {frame_ind}.'
             for ind, cell in enumerate(cell_starts):
                 if self.is_3d:
                     curr_cell = df.loc[cell, ["centroid_depth", "centroid_row", "centroid_col"]].values
@@ -114,10 +124,23 @@ class Postprocess(object):
 
                 distance = ((finish_cell - curr_cell) ** 2).sum(axis=-1)
                 nearest_cell = np.argmin(distance, axis=-1)
-                parent_cell = int(finish_node_ids[nearest_cell])
+                parent_cell = int(finish_node_ids[nearest_cell])    # find nearest cell
+
+                # id_child = df.id[cell]
+                # id_parent = df.id[parent_cell]
+                # str_match += f" {id_child}(c, {cell}) -> {id_parent}(p, {parent_cell}),  "
+
                 df_parent.loc[ind, "child_id"] = cell
                 df_parent.loc[ind, "parent_id"] = parent_cell
+
+                # df_parent.loc[ind, "child_id"] = id_child
+                # df_parent.loc[ind, "parent_id"] = id_parent
+            # print(str_match)
         else:
+            # todo: implement start with mitosis in the same frame !! try maybe to do it by thresholds!
+            # we are under the assumption that in the last frame there is no end of trajectory
+            # implement start without mitosis -
+
             df_parent.loc[:, "child_id"] = cell_starts
             df_parent.loc[:, "parent_id"] = 0
 
@@ -146,7 +169,8 @@ class Postprocess(object):
             # validate that only one place exists
             coordinates_child = np.argwhere(all_frames_traject == child_ind)
             n_places = coordinates_child.shape[0]
-
+            if n_places > 1:
+                stp=2
             assert n_places == 1, f"Problem! find {n_places} places which the current child appears"
 
             coordinates_child = coordinates_child.squeeze()
@@ -164,6 +188,8 @@ class Postprocess(object):
 
             df_parents_all.loc[ind, "end_frame"] = int(e_frame)
             curr_id = curr_col[-1]
+            # if curr_id == 0: todo: remove
+            #     curr_id = all_frames_traject.max() + 10
             df_parents_all.loc[ind, "child_id"] = curr_id
             frames_traject_same_label[row:e_frame + 1, col] = curr_id
 
@@ -254,8 +280,9 @@ class Postprocess(object):
         # find number of frames for iterations
         frame_nums = np.unique(df.frame_num)
         # find number of cells in each frame and build matrix [num_frames, max_cells]
+        # todo: change the code to handle with more cells trajectories using adding a column
         max_elements = [df.frame_num.isin([i]).sum() for i in frame_nums]
-        all_frames_traject = np.zeros((frame_nums.shape[0], max(max_elements)))
+        all_frames_traject = np.zeros((frame_nums.shape[0], max(max_elements)))    #    + 50))
 
         # intialize the matrix with -2 meaning empty cell, -1 means end of trajectory,
         # other value means the number of node in the graph
@@ -282,7 +309,8 @@ class Postprocess(object):
                 if i in connected_indices[0, :]:
                     ind_place = np.argwhere(connected_indices[0, :] == i)
 
-                    if ind_place.shape[-1] > 1:
+                    if ind_place.shape[-1] > 1:  # two nodes in the next frame are connected to current node
+                        # TODO: should determined which one to take of the two...
                         next_frame_ind = connected_indices[1, ind_place].numpy().squeeze()
                         if self.is_3d:
                             next_frame = df.loc[next_frame_ind, ["centroid_depth", "centroid_row", "centroid_col"]].values
@@ -290,7 +318,8 @@ class Postprocess(object):
                         else:
                             next_frame = df.loc[next_frame_ind, ["centroid_row", "centroid_col"]].values
                             curr_node = df.loc[i, ["centroid_row", "centroid_col"]].values
-
+                        # find closet from the options
+                        # print(f"frame : {frame_ind}, next_frame values: {next_frame}, next_frame_ind: {next_frame_ind}, curr_node_val:{curr_node}, curr_node_vind:{i}")
                         distance = ((next_frame - curr_node) ** 2).sum(axis=-1)
                         nearest_cell = np.argmin(distance, axis=-1)
                         # add to the array
@@ -300,6 +329,9 @@ class Postprocess(object):
                         next_node_ind = connected_indices[1, ind_place[0]]
                     else:  # no node in the next frame is connected to current node -
                         # in this case we end the trajectory
+                        # todo: validate somehow if the end is correct
+                        print(f"frame : {frame_ind}, cell_index: {i}, " + '*' * 20)
+
                         next_node_ind = -1
 
                 else:
@@ -308,6 +340,7 @@ class Postprocess(object):
                     if i == 0:
                         self.flag_id0_terminate = True
                     next_node_ind = -1
+                    # print(f"frame : {frame_ind}, cell_index: {i}, {i} is not in connected_indices[0, :]")
 
                 next_frame_indices = np.append(next_frame_indices, next_node_ind)
                 # count the number of starting trajectories
@@ -364,6 +397,7 @@ class Postprocess(object):
         idx_str = "%03d" % idx
         file_name = f"mask{idx_str}.tif"
         full_dir = osp.join(self.save_tra_dir, file_name)
+        print(f"Saving file: {full_dir}")
         io.imsave(full_dir, new_pred.astype(np.uint16))
 
     def check_ids_consistent(self, frame_ind, pred_ids, curr_ids):
@@ -482,6 +516,7 @@ class Postprocess(object):
                 mask_where = np.logical_and(np.logical_not(mask_val), mask_where)
 
                 frame_ids.append(true_id)
+                # TODO: problem with the overlaping!
 
             isOK, predID_not_in_currID = self.check_ids_consistent(idx, np.unique(pred_copy), frame_ids)
             if not debug:
@@ -492,22 +527,35 @@ class Postprocess(object):
         self.save_txt(self.file_str, self.save_tra_dir, 'res_track.txt')
 
 
+def my_imshow(img, title_str, cmap='gray'):
+    plt.figure()
+    plt.imshow(img, cmap=cmap)
+    plt.colorbar()
+    plt.title(title_str)
+    plt.show()
 
 if __name__== "__main__":
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-modality', type=str, required=True, help='2D/3D modality')
-    parser.add_argument('-iseg', type=str, required=True, help='segmentation output directory')
-    parser.add_argument('-oi', type=str, required=True, help='inference output directory')
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('-modality', type=str, required=True, help='2D/3D modality')
+    # parser.add_argument('-iseg', type=str, required=True, help='segmentation output directory')
+    # parser.add_argument('-oi', type=str, required=True, help='inference output directory')
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    modality = args.modality
+    SEQUENCE="01"
+
+    DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
+    MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
+    MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
+    MODALITY="2D"
+
+    modality = MODALITY
     assert modality == '2D' or modality == '3D'
 
-    path_inference_output = args.oi
-    path_Seg_result = args.iseg
+    path_inference_output = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_RES_inference"
+    path_Seg_result = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_SEG_RES"
 
     is_3d = '3d' in modality.lower()
     directed = True

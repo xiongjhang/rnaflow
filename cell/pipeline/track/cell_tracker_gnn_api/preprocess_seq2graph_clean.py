@@ -12,7 +12,7 @@ from skimage.measure import regionprops
 import warnings
 warnings.filterwarnings("always")
 
-from src_metric_learning.modules.resnet_2d.resnet import set_model_architecture, MLP
+from models.metric_learning.modules.resnet import set_model_architecture, MLP
 from skimage.morphology import label
 
 
@@ -51,7 +51,7 @@ class TestDataset(Dataset):
         im_path, image = None, None
         if len(self.images):
             im_path = self.images[idx]
-            image = np.array(Image.open(im_path))
+            image = np.array(Image.open(im_path))  # .convert("L")  # convert to black and white
 
         result_path, result = None, None
         if len(self.results):
@@ -124,6 +124,7 @@ class TestDataset(Dataset):
 
             img, result, im_path, result_path = self[ind_data]
             res_save = result.copy()
+            print(f"start: {result_path}")
             labels_mask = result.copy()
             while True:
                 bin_mask = labels_mask > 0
@@ -133,6 +134,7 @@ class TestDataset(Dataset):
                 if np.any(counts < min_cell_size):
                     per_mask_change = True
 
+                    # print(f"{im_path}: \n {counts}")
                     first_label_ind = np.argwhere(counts < min_cell_size)
                     if first_label_ind.size > 1:
                         first_label_ind = first_label_ind.squeeze()[0]
@@ -146,7 +148,7 @@ class TestDataset(Dataset):
                 warnings.warn(
                     f"pay attention! the labels have changed from {np.unique(res_save)} to {np.unique(result)}")
 
-
+            # assert np.all(np.unique(result) == np.unique(res_save))
             for ind, id_res in enumerate(np.unique(result)):
                 if id_res == 0:
                     continue
@@ -157,7 +159,7 @@ class TestDataset(Dataset):
 
                     if np.any(counts < min_cell_size):
                         per_cell_change = True
-
+                        # print(f"{im_path}: \n {counts}")
                         first_label_ind = np.argwhere(counts < min_cell_size)
                         if first_label_ind.size > 1:
                             first_label_ind = first_label_ind.squeeze()[0]
@@ -173,6 +175,7 @@ class TestDataset(Dataset):
                     if un_labels.shape[0] > 2:
                         per_cell_change = True
                         n_changes += 1
+                        # print(f"un_labels.shape[0] > 2 : {im_path}: \n {counts}")
                         first_label_ind = np.argmin(counts)
                         if first_label_ind.size > 1:
                             first_label_ind = first_label_ind.squeeze()[0]
@@ -191,12 +194,18 @@ class TestDataset(Dataset):
                 res2 = (result > 0) * 1.0
                 n_pixels = np.abs(res1 - res2).sum()
                 print(f"per_mask_change={per_mask_change}, per_cell_change={per_cell_change}, number of changed pixels: {n_pixels}")
+                stp = 2
                 io.imsave(result_path, result.astype(np.uint16), compress=6)
-
+            # assert np.all(np.unique(result) == np.unique(res_save))
 
 
         print(f"number of detected changes: {n_changes}")
 
+        # patch = img[min_row_bb: max_row_bb, min_col_bb: max_col_bb]
+        # fig, ax = plt.subplots(1, 2, figsize=(17, 6))
+        # ax[0].imshow(patch, cmap='gray')
+        # ax[1].imshow(result[min_row_bb: max_row_bb, min_col_bb: max_col_bb] == id_res, cmap='gray')
+        # plt.show()
 
     def find_min_max_and_roi(self):
         global_min = 2 ** 16 - 1
@@ -270,13 +279,20 @@ class TestDataset(Dataset):
         self.embedder = embedder
         self.embedder.eval()
 
+        # id, area, bbox_area, min_row_bb, min_col_bb, max_row_bb, max_col_bb, centroid_row, centroid_col = 8 + id = 9
+        # max_intensity, mean_intensity, min_intensity, orientation, perimeter, weighted_centroid_row, weighted_centroid_col = 7
+        # equivalent_diameter: float = The diameter of a circle with the same area as the region. ???
+
         cols = ["seg_label",
                 "frame_num",
                 "area",
+                "bbox_area",
                 "min_row_bb", "min_col_bb", "max_row_bb", "max_col_bb",
                 "centroid_row", "centroid_col",
                 "major_axis_length", "minor_axis_length",
-                "max_intensity", "mean_intensity", "min_intensity"
+                "max_intensity", "mean_intensity", "min_intensity",
+                "orientation", "perimeter",
+                "weighted_centroid_row", "weighted_centroid_col"
                 ]
 
 
@@ -307,7 +323,7 @@ class TestDataset(Dataset):
                 df.loc[row_ind, cols_resnet] = embedded_feat
                 df.loc[row_ind, "seg_label"] = id_res
 
-                df.loc[row_ind, "area"] = properties.area
+                df.loc[row_ind, "area"], df.loc[row_ind, "bbox_area"] = properties.area, properties.bbox_area
 
                 df.loc[row_ind, "min_row_bb"], df.loc[row_ind, "min_col_bb"], \
                 df.loc[row_ind, "max_row_bb"], df.loc[row_ind, "max_col_bb"] = properties.bbox
@@ -322,6 +338,15 @@ class TestDataset(Dataset):
                 df.loc[row_ind, "max_intensity"], df.loc[row_ind, "mean_intensity"], df.loc[row_ind, "min_intensity"] = \
                     properties.max_intensity, properties.mean_intensity, properties.min_intensity
 
+                df.loc[row_ind, "orientation"], df.loc[row_ind, "perimeter"] = properties.orientation, \
+                                                                               properties.perimeter
+                if properties.weighted_centroid[0] != properties.weighted_centroid[0] or properties.weighted_centroid[
+                    1] != properties.weighted_centroid[1]:
+                    df.loc[row_ind, "weighted_centroid_row"], df.loc[
+                        row_ind, "weighted_centroid_col"] = properties.centroid
+                else:
+                    df.loc[row_ind, "weighted_centroid_row"], df.loc[
+                        row_ind, "weighted_centroid_col"] = properties.weighted_centroid
 
             df.loc[:, "frame_num"] = int(im_num)
 
@@ -331,8 +356,8 @@ class TestDataset(Dataset):
             full_dir = op.join(path_to_write, "csv")
             os.makedirs(full_dir, exist_ok=True)
             file_path = op.join(full_dir, f"frame_{im_num}.csv")
+            print(f"save file to : {file_path}")
             df.to_csv(file_path, index=False)
-        print(f"files were saved to : {full_dir}")
 
 
 def create_csv(input_images, input_seg, input_model, output_csv, min_cell_size):
@@ -350,23 +375,30 @@ def create_csv(input_images, input_seg, input_model, output_csv, min_cell_size):
 
 
 if __name__ == "__main__":
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-ii', type=str, required=True, help='input images directory')
-    parser.add_argument('-iseg', type=str, required=True, help='input segmentation directory')
-    parser.add_argument('-im', type=str, required=True, help='metric learning model params directory')
-    parser.add_argument('-cs', type=int, required=True, help='min cell size')
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('-ii', type=str, required=True, help='input images directory')
+    # parser.add_argument('-iseg', type=str, required=True, help='input segmentation directory')
+    # parser.add_argument('-im', type=str, required=True, help='metric learning model params directory')
+    # parser.add_argument('-cs', type=int, required=True, help='min cell size')
 
-    parser.add_argument('-oc', type=str, required=True, help='output csv directory')
+    # parser.add_argument('-oc', type=str, required=True, help='output csv directory')
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    min_cell_size = args.cs
-    input_images = args.ii
-    input_segmentation = args.iseg
-    input_model = args.im
+    SEQUENCE="01"
 
-    output_csv = args.oc
+    DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
+    MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
+    MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
+    MODALITY="2D"
+
+    min_cell_size = 20
+    input_images = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01"
+    input_segmentation = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_GT/SEG"
+    input_model = MODEL_METRIC_LEARNING
+
+    output_csv = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_CSV"
 
     create_csv(input_images, input_segmentation, input_model, output_csv, min_cell_size)
