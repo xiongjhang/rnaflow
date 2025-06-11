@@ -8,11 +8,15 @@ Code for RNA Transcription Kinetics Analysis, including cell segmentaiton, cell 
 
 - [x] release pipeline code
 
+    - [ ] improve the code, test pipeline on dataset
+
 - [ ] support micro-sam 
 
 - [ ] support cellpose-sam
 
-- [ ] support more advanced track methods, i.e. trackastra
+- [x] support more advanced track methods
+
+    - [x] add cell-track-gnn, trackastra
 
 - [ ] combine sam-based detection method with sam2 for instance tracking
 
