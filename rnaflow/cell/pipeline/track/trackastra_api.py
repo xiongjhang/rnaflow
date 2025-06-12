@@ -12,11 +12,11 @@ def cell_track(imgs: np.ndarray, masks: np.ndarray, device: str,
                model_name: str = "general_2d", mode: str = "greedy"
             ):
     
-    assert imgs.ndim == 3 and imgs.shape[0] > 1
-    assert imgs.shape == masks.shape
+    assert imgs.ndim == 3 and imgs.shape[0] > 1, "Input images should be a 3D array (time, height, width)"
+    assert imgs.shape == masks.shape, "Input images and masks should have the same shape"
 
-    model = Trackastra.from_pretrained("general_2d", device=device)
-    track_graph = model.track(imgs, masks, mode="greedy")  # or mode="ilp", or "greedy_nodiv"
+    model = Trackastra.from_pretrained(model_name, device=device)
+    track_graph = model.track(imgs, masks, mode=mode)  # or mode="ilp", or "greedy_nodiv"
     ctc_tracks, masks_tracked = graph_to_ctc(
         track_graph,
         masks,
