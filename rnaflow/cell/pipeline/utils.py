@@ -2,12 +2,22 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple, Optional, Any
 import logging
 import sys
+import importlib
 
 from tqdm.auto import tqdm
 import tifffile as tiff
+
+def get_class(class_name: str, modules: List[str] = None) -> Any:
+    '''Get a class by its name from a list of modules.'''
+    for module in modules:
+        m = importlib.import_module(module)
+        clazz = getattr(m, class_name, None)
+        if clazz is not None:
+            return clazz
+    raise RuntimeError(f'Unsupported dataset class: {class_name}')
 
 # region logging
 
