@@ -8,11 +8,11 @@ Code for RNA Transcription Kinetics Analysis, including cell segmentaiton, cell 
 
 - [x] release pipeline code
 
-    - [ ] improve the code, test pipeline on dataset
+    - [x] improve the code, test pipeline on dataset
 
-- [ ] support micro-sam 
+- [x] support micro-sam 
 
-- [ ] support cellpose-sam
+- [x] support cellpose-sam
 
 - [x] support more advanced track methods
 
@@ -39,6 +39,7 @@ conda activate rnaflow
 python -m pip install cellpose
 conda install -c conda-forge -c gurobi -c funkelab ilpy
 pip install "trackastra[ilp]"
+conda install -c conda-forge micro_sam
 
 git clone https://github.com/xiongjhang/rnaflow.git
 cd rnaflow
