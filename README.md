@@ -20,6 +20,10 @@ Code for RNA Transcription Kinetics Analysis, including cell segmentaiton, cell 
 
 - [ ] combine sam-based detection method with sam2 for instance tracking
 
+- [ ] annotate an LLS cell segmentation and tracking dataset
+
+- [ ] Fine-tune segmentation model
+
 #### RNA Transcription Site Part
 
 - [x] release pipeline code
