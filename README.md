@@ -33,9 +33,26 @@ Code for RNA Transcription Kinetics Analysis, including cell segmentaiton, cell 
       
 ## Installation
 
-TODO
+```bash
+conda create --name rnaflow python=3.10
+conda activate rnaflow
+python -m pip install cellpose
+conda install -c conda-forge -c gurobi -c funkelab ilpy
+pip install "trackastra[ilp]"
 
+git clone https://github.com/xiongjhang/rnaflow.git
+cd rnaflow
+pip install -e .
+```
+
+**Notes/Troubleshooting**
+
+- `pip install "trackastra[ilp]` raise `src/pyscipopt/scip.c:1146:10: fatal error: scip/type_retcode.h: No such file or directory`
+
+    这个错误是由于安装 pyscipopt 时缺少 SCIP 优化套件的依赖导致的
     
+    **Solution:**  `conda install -c conda-forge scip`
+
 ## Usage/Examples
 
 TODO
