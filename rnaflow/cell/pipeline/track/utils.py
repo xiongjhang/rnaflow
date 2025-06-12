@@ -192,7 +192,8 @@ def extract_single_cell_seq_from_track_res(
 
     seq_row = seq_col = size
     num_cells = track_res.shape[0]
-    for frame_num, (cell_id, begin_frame, end_frame, parent_id) in enumerate(track_res, 0):
+    for cell_idx, (cell_id, begin_frame, end_frame, parent_id) in enumerate(track_res, 0):
+        # TODO: account for parent_id
         cell_seq_list = []
         empty_cnt = 0
         for frame in range(begin_frame, end_frame + 1):
