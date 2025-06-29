@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# activate environment
+source activate cell-tracking-challenge
+
 # Inference script for cell tracking using Cell Tracker GNN from
 # /home/xiongjiahang/repo/cell-tracker-gnn-software
 
@@ -28,12 +31,15 @@ MODALITY="2D"
 # Finish segmentation - start tracking
 
 # our model needs CSVs, so let's create from image and segmentation.
+echo "Preprocessing sequence ${SEQUENCE} for tracking..."
 python ${CODE_TRA}/preprocess_seq2graph_clean.py -cs 20 -ii "${DATASET}/${SEQUENCE}" -iseg "${DATASET}/${INPUT_SEG}" -im "${MODEL_METRIC_LEARNING}" -oc "${TRACK_DIR}/${SEQUENCE}_CSV"
 
 # run the prediction
+echo "Running inference for sequence ${SEQUENCE}..."
 python ${CODE_TRA}/inference_clean.py -mp "${MODEL_PYTORCH_LIGHTNING}" -ns "${SEQUENCE}" -oc "${TRACK_DIR}"
 
 # postprocess
+echo "Postprocessing sequence ${SEQUENCE}..."
 python ${CODE_TRA}/postprocess_clean.py -modality "${MODALITY}" -iseg "${DATASET}/${INPUT_SEG}" -oi "${TRACK_DIR}/${SEQUENCE}_RES_inference"
 
 # rm -r "${DATASET}/${SEQUENCE}_CSV" "${DATASET}/${SEQUENCE}_RES_inference" "${DATASET}/${SEQUENCE}_SEG_RES"
