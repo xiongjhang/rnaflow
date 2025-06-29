@@ -69,6 +69,20 @@ pip install -e .
 
 **Tips**: `2.` and `3.` may be caused by `conda install -c conda-forge micro_sam`, there may be some conflicts.
 
+Error Message:
+
+```bash
+/ By downloading and using the cuDNN conda packages, you accept the terms and conditions of the NVIDIA cuDNN EULA -
+  https://docs.nvidia.com/deeplearning/cudnn/sla/index.html
+
+| g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libicuuc.so.75)
+g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libLerc.so.4)
+
+\ 
+- g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libicuuc.so.75)
+g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libLerc.so.4)
+```
+
 ## Usage/Examples
 
 TODO
