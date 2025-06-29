@@ -375,30 +375,23 @@ def create_csv(input_images, input_seg, input_model, output_csv, min_cell_size):
 
 
 if __name__ == "__main__":
-    # import argparse
+    import argparse
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('-ii', type=str, required=True, help='input images directory')
-    # parser.add_argument('-iseg', type=str, required=True, help='input segmentation directory')
-    # parser.add_argument('-im', type=str, required=True, help='metric learning model params directory')
-    # parser.add_argument('-cs', type=int, required=True, help='min cell size')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-ii', type=str, required=True, help='input images directory')
+    parser.add_argument('-iseg', type=str, required=True, help='input segmentation directory')
+    parser.add_argument('-im', type=str, required=True, help='metric learning model params directory')
+    parser.add_argument('-cs', type=int, required=True, help='min cell size')
 
-    # parser.add_argument('-oc', type=str, required=True, help='output csv directory')
+    parser.add_argument('-oc', type=str, required=True, help='output csv directory')
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    SEQUENCE="01"
+    min_cell_size = args.cs
+    input_images = args.ii
+    input_segmentation = args.iseg
+    input_model = args.im
 
-    DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
-    MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
-    MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
-    MODALITY="2D"
-
-    min_cell_size = 20
-    input_images = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01"
-    input_segmentation = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_GT/SEG"
-    input_model = MODEL_METRIC_LEARNING
-
-    output_csv = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_CSV"
+    output_csv = args.oc
 
     create_csv(input_images, input_segmentation, input_model, output_csv, min_cell_size)

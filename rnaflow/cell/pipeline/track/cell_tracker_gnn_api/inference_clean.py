@@ -65,25 +65,18 @@ def predict(ckpt_path, path_csv_output, num_seq):
 
 
 if __name__ == "__main__":
-    # import argparse
+    import argparse
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('-mp', type=str, required=True, help='model params full path')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-mp', type=str, required=True, help='model params full path')
 
-    # parser.add_argument('-ns', type=str, required=True, help='number of sequence - string 01/02')
-    # parser.add_argument('-oc', type=str, required=True, help='output csv directory')
+    parser.add_argument('-ns', type=str, required=True, help='number of sequence - string 01/02')
+    parser.add_argument('-oc', type=str, required=True, help='output csv directory')
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    SEQUENCE="01"
-
-    DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
-    MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
-    MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
-    MODALITY="2D"
-
-    model_path = MODEL_PYTORCH_LIGHTNING
-    num_seq = SEQUENCE
-    output_csv = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
+    model_path = args.mp
+    num_seq = args.ns
+    output_csv = args.oc
     assert num_seq == '01' or num_seq == '02'
     predict(model_path, output_csv, num_seq)

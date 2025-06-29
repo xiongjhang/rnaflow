@@ -388,8 +388,8 @@ class Postprocess(object):
         return pred
 
     def create_save_dir(self):
-        num_seq = self.dir_result.split('/')[-1][:2]
-        save_tra_dir = osp.join(self.dir_result, f"../{num_seq}_RES")
+        num_seq = self.path_inference_output.split('/')[-1][:2]
+        save_tra_dir = osp.join(self.path_inference_output, f"../{num_seq}_RES")
         self.save_tra_dir =save_tra_dir
         os.makedirs(self.save_tra_dir, exist_ok=True)
 
@@ -535,27 +535,20 @@ def my_imshow(img, title_str, cmap='gray'):
     plt.show()
 
 if __name__== "__main__":
-    # import argparse
+    import argparse
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('-modality', type=str, required=True, help='2D/3D modality')
-    # parser.add_argument('-iseg', type=str, required=True, help='segmentation output directory')
-    # parser.add_argument('-oi', type=str, required=True, help='inference output directory')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-modality', type=str, required=True, help='2D/3D modality')
+    parser.add_argument('-iseg', type=str, required=True, help='segmentation output directory')
+    parser.add_argument('-oi', type=str, required=True, help='inference output directory')
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    SEQUENCE="01"
-
-    DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
-    MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
-    MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
-    MODALITY="2D"
-
-    modality = MODALITY
+    modality = args.modality
     assert modality == '2D' or modality == '3D'
 
-    path_inference_output = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_RES_inference"
-    path_Seg_result = "/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/01_SEG_RES"
+    path_inference_output = args.oi
+    path_Seg_result = args.iseg
 
     is_3d = '3d' in modality.lower()
     directed = True
@@ -569,11 +562,3 @@ if __name__== "__main__":
                      path_seg_result=path_Seg_result)
     all_frames_traject, trajectory_same_label, df_trajectory, str_track = pp.create_trajectory()
     pp.fill_mask_labels(debug=False)
-
-
-
-
-
-
-
-

@@ -1,13 +1,20 @@
 #!/bin/bash
 
+# Inference script for cell tracking using Cell Tracker GNN from
+# /home/xiongjiahang/repo/cell-tracker-gnn-software
+
 SEQUENCE="01"
-SPACING="999 0.125 0.125"
-FOV="0"
-SIZES="15 10000"
-DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+"
-# CODE_SEG="${PWD}/seg_code/old_version"
+# SPACING="999 0.125 0.125"
+# FOV="0"
+# SIZES="15 10000"
+DATASET="/mnt/sda/xjh/dataset/cell-data/test_pipeline/Fluo-N2DH-SIM+/cell-track-gnn"   # change this to your dataset path
+INPUT_SEG="${SEQUENCE}_SEG_RES"
+TRACK_DIR="${DATASET}/${SEQUENCE}_TRACK/cell_tracker_gnn"
+
 CODE_TRA="${PWD}"
-SEG_MODEL="${PWD}/parameters/Seg_Models/Fluo-N2DH-SIM+/"
+# CODE_SEG="${PWD}/seg_code/old_version"
+# SEG_MODEL="${PWD}/parameters/Seg_Models/Fluo-N2DH-SIM+/"
+
 MODEL_METRIC_LEARNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Features_Models/Fluo-N2DH-SIM+/all_params.pth"
 MODEL_PYTORCH_LIGHTNING="/home/xiongjiahang/repo/cell-tracker-gnn-software/parameters/Tracking_Models/Fluo-N2DH-SIM+/checkpoints/epoch=132.ckpt"
 MODALITY="2D"
@@ -21,12 +28,12 @@ MODALITY="2D"
 # Finish segmentation - start tracking
 
 # our model needs CSVs, so let's create from image and segmentation.
-# python ${CODE_TRA}/preprocess_seq2graph_clean.py -cs 20 -ii "${DATASET}/${SEQUENCE}" -iseg "${DATASET}/${SEQUENCE}_SEG_RES" -im "${MODEL_METRIC_LEARNING}" -oc "${DATASET}/${SEQUENCE}_CSV"
+python ${CODE_TRA}/preprocess_seq2graph_clean.py -cs 20 -ii "${DATASET}/${SEQUENCE}" -iseg "${DATASET}/${INPUT_SEG}" -im "${MODEL_METRIC_LEARNING}" -oc "${TRACK_DIR}/${SEQUENCE}_CSV"
 
 # run the prediction
-# python ${CODE_TRA}/inference_clean.py -mp "${MODEL_PYTORCH_LIGHTNING}" -ns "${SEQUENCE}" -oc "${DATASET}"
+python ${CODE_TRA}/inference_clean.py -mp "${MODEL_PYTORCH_LIGHTNING}" -ns "${SEQUENCE}" -oc "${TRACK_DIR}"
 
 # postprocess
-python ${CODE_TRA}/postprocess_clean.py -modality "${MODALITY}" -iseg "${DATASET}/${SEQUENCE}_SEG_RES" -oi "${DATASET}/${SEQUENCE}_RES_inference"
+python ${CODE_TRA}/postprocess_clean.py -modality "${MODALITY}" -iseg "${DATASET}/${INPUT_SEG}" -oi "${TRACK_DIR}/${SEQUENCE}_RES_inference"
 
 # rm -r "${DATASET}/${SEQUENCE}_CSV" "${DATASET}/${SEQUENCE}_RES_inference" "${DATASET}/${SEQUENCE}_SEG_RES"
