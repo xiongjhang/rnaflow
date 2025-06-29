@@ -157,7 +157,13 @@ class Predictor(ABC):
         raise NotImplementedError("This method should be overridden by subclasses.")
 
 
-def map_fn_to_frames(imgs_path_list: List[Path], fn, save_dir: Path, save_prefix: str = 't', **kwargs) -> List:
+def map_fn_to_frames(
+        imgs_path_list: List[Path], 
+        fn, 
+        save_dir: Path, 
+        save_prefix: str = 't', 
+        **kwargs
+) -> List:
     """
     Apply a function to each frame in a list of image paths.
     
@@ -168,15 +174,19 @@ def map_fn_to_frames(imgs_path_list: List[Path], fn, save_dir: Path, save_prefix
     Returns:
         List: List of results after applying the function to each frame.
     """
+    # TODO: support parallel processing
+
+    assert save_dir.is_dir(), f"save_dir must be a directory, got {save_dir}"
+    if not save_dir.exists():
+        save_dir.mkdir(parents=True, exist_ok=True)
+
     num_frames = len(imgs_path_list)
     results = []
     for i, img_path in tqdm(enumerate(imgs_path_list), total=num_frames, desc='Processing frames', unit="frame"):
         img = tiff.imread(img_path)
         result = fn(img, **kwargs)
-        if save_dir is not None:
-            if not save_dir.exists():
-                save_dir.mkdir(parents=True, exist_ok=True)
-            save_path = save_dir / f'{save_prefix}_{i:04d}.tif'
-            tiff.imwrite(save_path, result)
+            
+        save_path = save_dir / f'{save_prefix}_{i:04d}.tif'
+        tiff.imwrite(save_path, result)
         results.append(result)
     return results  

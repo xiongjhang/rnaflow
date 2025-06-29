@@ -12,11 +12,13 @@ from rnaflow.cell.pipeline.utils import get_logger
 
 logger = get_logger(__name__, level=logging.INFO)
 
+# Prepare for Cellpose model
 def prepare(gpu=True):
     logger.info(f"Loading Cellpose model...")
     model = models.CellposeModel(gpu=gpu)
     return model
 
+# Pure inference function for segmenting images
 def seg_per_frame(
         segmentor, 
         img: Union[Path, List[Path], np.ndarray],
@@ -42,6 +44,7 @@ def seg_per_frame(
 
     return masks_pred
 
+# Pipeline function to segment images and save results
 def segment_fn(
         input: Union[Path, List[Path]],
         save_dir: Path,
@@ -50,13 +53,14 @@ def segment_fn(
         batch_size: Optional[int] = None,
 ):
     """Segment an image using the Cellpose model."""
+    # TODO: support mask filter
+    # TODO: support batch inference
+
     if isinstance(input, Path):
         input =  sorted(input.glob('*.tif'))
     img_paths = input
     segmentor = prepare()
-
-    # TODO: support mask filter
-    # TODO: support batch inference
+    
     for idx, img_path in tqdm(enumerate(img_paths), desc='Segmenting images', unit='image'):
         mask = seg_per_frame(segmentor, img_path)
         dst_img_path = save_dir / f'{prefix}{idx:04d}.tif'

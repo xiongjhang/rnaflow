@@ -1,5 +1,16 @@
 import numpy as np
 
+'''
+sunrui version:
+
+    for idx, img_path in enumerate(self.raw_imgs_paths):
+        img = tiff.imread(img_path)
+        img = hist_match(img, img0)
+        img = uint8_to_uint16(img)
+        dst_img_path = self.pre_data_dir / f'test_{idx:04d}.tif'
+        tiff.imwrite(dst_img_path, img)
+'''
+
 def hist_match(source, template):  
     # 计算源图像和目标图像的直方图  
     source_hist, _ = np.histogram(source.ravel(), 256, [0, 256])  

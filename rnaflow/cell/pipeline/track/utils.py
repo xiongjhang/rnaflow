@@ -30,6 +30,8 @@ def load_track_res(txt_file_path: Path):
     track_res = np.genfromtxt(txt_file_path, dtype=[int, int, int, int])
     return track_res
 
+# MARK: Post-processing functions
+
 def extract_cell_statistis_from_frame(
     img: Union[np.ndarray, Path],
     mask: Union[np.ndarray, Path],
