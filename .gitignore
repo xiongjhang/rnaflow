@@ -173,7 +173,8 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# test data
+# test
+*.ipynb
 data_example/
 
 # lauch scripts (temporary)
