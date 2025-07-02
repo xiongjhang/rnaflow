@@ -140,7 +140,7 @@ class CellPredictor(object):
             extract_cell_statistis_from_frames(self.raw_data_dir, self.track_data_dir)
             logger.info('Cell statistics extraction completed. Results saved to: %s', self.track_data_dir)
 
-    def extract_(self, exist_ok: bool = True):
+    def extract_cell_seq(self, exist_ok: bool = True):
         """Post-process the tracking results to extract cell statistics and sequences."""
         if not self.cell_seq_dir.exists() or exist_ok:
             self.cell_seq_dir.mkdir(parents=True, exist_ok=True)
