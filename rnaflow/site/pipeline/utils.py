@@ -20,11 +20,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__class = ['utils', 'detection', 'registration', 'fp filter', 'trajectory', 'compute intensity']
 
-# =====
-# Utils
-# =====
+# region Utils
 
 _EPSILON = 1e-10
 PathType = Union[str, Path, Iterable[str], Iterable[Path]]
@@ -97,9 +94,8 @@ def delete_cell_folders(directory):
             field_site_path = os.path.join(field_path, site_num)
             delete_folders(field_site_path)
 
-# ===========
-# Helper Func
-# ===========
+
+# region Helper Func
 
 def mask_to_coordinate(
     matrix: np.ndarray, probability: float = 0.5
@@ -237,9 +233,8 @@ def linear_sum_assignment(
             ncol.append(c)
     return nrow, ncol
 
-# =======
-# Dection
-# =======
+
+# region Dection
 
 def spotlearn_norm(img: np.array):
 
@@ -260,9 +255,7 @@ def spotlearn_norm(img: np.array):
     return a
 
 
-# ============
-# Registration
-# ============
+# region Registration
 
 def rigid_registration(fixed: np.ndarray, moving: np.ndarray):
     """Perform rigid registration
@@ -401,9 +394,7 @@ def coord_reg_to_raw(reg_x, reg_y, transform):
     return org_x, org_y
 
 
-# =========
-# FP Filter
-# =========
+# region FP Filter
 
 def gaussian_filter(pic):
     fit_flag, _, fit_res = gaussian_fit(pic, 3, fix_sigma=False, abs_bg=False)
@@ -489,9 +480,8 @@ def fp_filter(pic, rf_model=None, nn_model=None):
 
     return rf_res, nn_res
 
-# ==========
-# Trajectory
-# ==========
+
+# region Trajectory
 
 def track_filter(track_data: pd.DataFrame, patch_len = [2, 3], search_range=3, memory=3):
     '''对于长度在patch_len的patch进行距离和时间的限制，并过滤超过范围的patch
@@ -713,9 +703,8 @@ def get_coor_from_mask():
 def traj_completion():
     pass
 
-# =================
-# Compute Intensity
-# =================
+
+# region Compute Intensity
 
 # template utils functions
 

@@ -79,21 +79,21 @@ def stack_to_frames(input_data, output_dir, prefix='t'):
         tiff.imwrite(frame_path, frame)
         # print(f"Saved frame {i} to {frame_path}")
 
-def frames_to_frames(folder_path):
+def frames_to_stack(folder_path):
     '''Concatenate all TIFF files in a specified folder into a single 3D NumPy array.'''
     tif_files = [f for f in os.listdir(folder_path) if f.endswith('.tif')]
-    print(f'total files: {tif_files}')
     tif_files.sort()
+    print(f'total files: {len(tif_files)}')
     
     images = []
     for tif_file in tif_files:
         file_path = os.path.join(folder_path, tif_file)
         img = tiff.imread(file_path)
-        print(f'file: {file_path}\nstack shape: {img.shape}')
+        # print(f'file: {file_path}\nstack shape: {img.shape}')
         images.append(img)
 
-    concatenated_array = np.concatenate(images, axis=0)
-    return concatenated_array
+    stack = np.stack(images, axis=0) if len(images) > 1 else images[0]
+    return stack
 
 def split_array_along_time(array, num_chunks):
     '''Split a 3D NumPy array into multiple chunks along the time dimension.'''
