@@ -1,84 +1,215 @@
+import os
+import os.path as op
+from pathlib import Path
+
+import tifffile as tiff
+from PIL import Image
+import torch
+from torch.utils.data import Dataset
 import numpy as np
+import pandas as pd
+import cv2
+from skimage import io
+from skimage.measure import regionprops
+from skimage.morphology import label
+import warnings
+warnings.filterwarnings("always")
 
-def check_distance(box_raw, img, threshold_overlap=0.8, threshold_distance=5,threshold_overlap_single=0.9):                  #0.5 /25/ 0.8 10.10change
-    # 初始化列表以存储筛选后的边界框
-    bbx_save = []
-    area_all = []
-    xy_all = np.zeros((2, len(box_raw)))  
+MIN_CELL_SIZE = 2000
+MAX_CELL_SIZE = 15000
 
-    # box_raw = box_raw.detach().numpy()  # 如果是PyTorch的Tensor
-    # 或者
-    box_raw = np.array(box_raw) # 如果是TensorFlow的Tensor
-
+def get_mask_info(mask: np.ndarray):
+    """Get the mask information including the number of cells, cell sizes, and bounding boxes.
+    Args:
+        mask (np.ndarray): The mask of the cells.
+    Returns:
+        num_cells (int): The number of cells in the mask.
+        cell_labels (np.ndarray): The labels of the cells in the mask.
+        cell_sizes (np.ndarray): The sizes of the cells in the mask.
+        bounding_boxes (np.ndarray): The bounding boxes of the cells in the mask.
+    """
+    props = regionprops(mask)
     
-    # 遍历每个边界框
-    for i, ids in enumerate(box_raw):
-        area = 0
-        box = ids
-        x0, y0 = box[0], box[1]
-        w, h = box[2] - box[0], box[3] - box[1]
-        
-        # 计算面积以备后用
-        area = w * h
-        
-        if area<250:
+    num_cells = len(props)
+    cell_labels = np.array([prop.label for prop in props])
+    cell_sizes = np.array([prop.area for prop in props])
+    bounding_boxes = np.array([prop.bbox for prop in props])
+    
+    return num_cells, cell_labels, cell_sizes, bounding_boxes
+
+
+def correct_mask(
+        img: np.ndarray,
+        mask: np.ndarray,
+        save_path: Path = None,
+        min_cell_size: int = 2000,
+        max_cell_size: int = 15000,
+):
+    """Post-process the mask to remove small and large cell regions.
+    
+    Adapted from https://github.com/talbenha/cell-tracker-gnn.
+    """
+    per_cell_change = False
+    per_mask_change = False
+    res_save = mask.copy()
+    labels_mask = mask.copy()
+    
+    # Filter cell regions based on size
+    while True:
+        bin_mask = labels_mask > 0
+        re_label_mask = label(bin_mask, connectivity=1)
+        un_labels, counts = np.unique(re_label_mask, return_counts=True)
+
+        if min_cell_size and np.any(counts < min_cell_size):
+            per_mask_change = True
+            first_label_ind = np.argwhere(counts < min_cell_size)
+            if first_label_ind.size > 1:
+                first_label_ind = first_label_ind.squeeze()[0]
+            first_label_num = un_labels[first_label_ind]
+            labels_mask[re_label_mask == first_label_num] = 0
+        elif max_cell_size and np.any(counts > max_cell_size):
+            per_mask_change = True
+            first_label_ind = np.argwhere(counts > max_cell_size)
+            if first_label_ind.size > 1:
+                first_label_ind = first_label_ind.squeeze()[0]
+            first_label_num = un_labels[first_label_ind]
+            labels_mask[re_label_mask == first_label_num] = 0
+        else:
+            break
+    
+    bin_mask = (labels_mask > 0) * 1.0
+    result = np.multiply(result, bin_mask)
+    if not np.all(np.unique(result) == np.unique(res_save)):
+        warnings.warn(
+            f"pay attention! the labels have changed from {np.unique(res_save)} to {np.unique(result)}")
+    
+    # Iterate through each unique label in the mask
+    for ind, id_res in enumerate(np.unique(result)):
+        if id_res == 0:
             continue
+        bin_mask = (result == id_res).copy() # binary mask for the current label
+        # remove small and large regions iteratively
+        while True:
+            re_label_mask = label(bin_mask)
+            un_labels, counts = np.unique(re_label_mask, return_counts=True)
 
-        area_all.append(area)  
-        
-        # 计算边界框的中心点
-        x = x0 + w / 2
-        y = y0 + h / 2
-        
-        # 确保中心点在图像范围内
-        h_img, w_img = img.shape[:2]
-        x = min(x, w_img)
-        y = min(y, h_img)
-        
-        # 存储中心点坐标
-        xy_all[0, i] = x
-        xy_all[1, i] = y
-        
-        # 检查边界框之间是否存在重叠,
-        overlap = False
-        for bbx in bbx_save:
-            # 计算交集面积
-            x_left = max(bbx[0], x0)
-            y_top = max(bbx[1], y0)
-            x_right = min(bbx[2], box[2])
-            y_bottom = min(bbx[3], box[3])
+            if np.any(counts < min_cell_size):
+                per_cell_change = True
+                # print(f"{im_path}: \n {counts}")
+                first_label_ind = np.argwhere(counts < min_cell_size)
+                if first_label_ind.size > 1:
+                    first_label_ind = first_label_ind.squeeze()[0]
+                first_label_num = un_labels[first_label_ind]
+                curr_mask = np.logical_and(result == id_res, re_label_mask == first_label_num)
+                bin_mask[curr_mask] = False
+                result[curr_mask] = 0.0
+            elif np.any(counts > max_cell_size):
+                per_cell_change = True
+                # print(f"{im_path}: \n {counts}")
+                first_label_ind = np.argwhere(counts > max_cell_size)
+                if first_label_ind.size > 1:
+                    first_label_ind = first_label_ind.squeeze()[0]
+                first_label_num = un_labels[first_label_ind]
+                curr_mask = np.logical_and(result == id_res, re_label_mask == first_label_num)
+                bin_mask[curr_mask] = False
+                result[curr_mask] = 0.0
+            else:
+                break
 
+        # If there are still multiple labels in the binary mask, choose the largest one
+        while True:
+            re_label_mask = label(bin_mask)
+            un_labels, counts = np.unique(re_label_mask, return_counts=True)
+            if un_labels.shape[0] > 2:
+                per_cell_change = True
+                # n_changes += 1
+                # print(f"un_labels.shape[0] > 2 : {im_path}: \n {counts}")
+                first_label_ind = np.argmin(counts)
+                if first_label_ind.size > 1:
+                    first_label_ind = first_label_ind.squeeze()[0]
+                first_label_num = un_labels[first_label_ind]
+                curr_mask = np.logical_and(result == id_res, re_label_mask == first_label_num)
+                bin_mask[curr_mask] = False
+                result[curr_mask] = 0.0
+            else:
+                break
 
-            bbx_x = bbx[0] + (bbx[2] - bbx[0])/2
-            bbx_y = bbx[1] + (bbx[3] - bbx[1])/2
-
-
-            distance = distance = np.sqrt((x - bbx_x)**2 + (y - bbx_y)**2)
-            if distance < threshold_distance:
-                # 判断是否为嵌套关系，是否全为内部，是则保留嵌套中小的mask
-                if x_right > x_left and y_bottom > y_top:
-                    intersection_area = (x_right - x_left) * (y_bottom - y_top)#相交面积
-                    bbx_area = (bbx[2] - bbx[0])*(bbx[3] - bbx[1])#bbx面积
-                    iou = intersection_area / (area + bbx_area - intersection_area)#两者交并比
-                    rate_1 = intersection_area/bbx_area #交集比单个mask（bbx）
-                    rate_2 = intersection_area/area #交集比单个mask（bbox）
-                    area_1 = bbx_area
-                    area_2 = area
-                    
-                    if rate_2 > threshold_overlap_single and bbx_area > area:
-                        # print('rate_2:',rate_2)
-                        # print('rate_1:',rate_1)
-                        if (bbx_save == bbx).all():  # 使用 .all() 方法检查数组中的所有元素是否与当前边界框匹配
-                            bbx_save.remove(bbx)
-                        # bbx_save.remove(bbx)
-                    elif rate_1 > threshold_overlap_single and bbx_area < area:
-                        # print('rate_2:',rate_2)
-                        # print('rate_1:',rate_1)
-                        overlap = True
-                        break
+    if not np.all(np.unique(result) == np.unique(res_save)):
+        warnings.warn(
+            f"pay attention! the labels have changed from {np.unique(res_save)} to {np.unique(result)}")
         
-        # 如果边界框通过了以上两个条件，则将其添加到保存的筛选后边界框列表中
-        if not overlap :
-            bbx_save.append(ids)
+    if per_cell_change or per_mask_change:
+        res1 = (res_save > 0) * 1.0
+        res2 = (result > 0) * 1.0
+        n_pixels = np.abs(res1 - res2).sum()
+        print(f"per_mask_change={per_mask_change}, per_cell_change={per_cell_change}, number of changed pixels: {n_pixels}")
     
-    return bbx_save
+    if save_path is not None:
+        tiff.imwrite(save_path, result.astype(np.uint16))
+    
+    return result.astype(np.uint16)
+
+def correct_mask_fast(
+        img: np.ndarray,
+        mask: np.ndarray,
+        save_path: Path = None,
+        min_cell_size: int = 500,
+        max_cell_size: int = 16000,
+):
+    """Fast version of the mask correction."""
+    per_cell_change = False
+    per_mask_change = False
+    res_save = mask.copy()
+    labels_mask = mask.copy()
+
+    '''Time Counsumption(cellpose-sam):
+    1. img size=(4666, 2023), bs=256, ~14s/frame
+    2. img size=(7016, 2048), bs=256, ~16s/frame
+    '''
+    # Filter cell regions based on size
+    re_label_mask = label(labels_mask, connectivity=2)
+    num_cells, cell_labels, cell_sizes, bounding_boxes = get_mask_info(re_label_mask)
+    
+    index_to_remove = np.where((cell_sizes < min_cell_size) | (cell_sizes > max_cell_size))[0]
+    if index_to_remove.size > 0:
+        per_mask_change = True
+        for index in index_to_remove:
+            labels_mask[re_label_mask == cell_labels[index]] = 0
+
+    bin_mask = (labels_mask > 0) * 1.0
+    result = np.multiply(mask, bin_mask)
+    # if not np.all(np.unique(result) == np.unique(res_save)):
+    #     warnings.warn(
+    #         f"pay attention! the labels have changed from {np.unique(res_save)} to {np.unique(result)}")
+
+    '''Time Counsumption(cellpose-sam):
+    '''
+    # If there are still multiple labels in the binary mask, choose the largest one
+    # for ind, id_res in enumerate(np.unique(result)):
+    #     if id_res == 0:
+    #         continue
+    #     bin_mask = (result == id_res).copy()
+    #     re_label_mask = label(bin_mask, connectivity=1)
+    #     un_labels, counts = np.unique(re_label_mask, return_counts=True)
+    #     if un_labels.shape[0] > 2:
+    #         per_cell_change = True
+    #         # n_changes += 1
+    #         # print(f"un_labels.shape[0] > 2 : {im_path}: \n {counts}")
+    #         first_label_ind = np.argmin(counts)
+    #         if first_label_ind.size > 1:
+    #             first_label_ind = first_label_ind.squeeze()[0]
+    #         first_label_num = un_labels[first_label_ind]
+    #         curr_mask = np.logical_and(result == id_res, re_label_mask == first_label_num)
+    #         bin_mask[curr_mask] = False
+    #         result[curr_mask] = 0.0
+
+    if per_cell_change or per_mask_change:
+        res1 = (res_save > 0) * 1.0
+        res2 = (result > 0) * 1.0
+        n_pixels = np.abs(res1 - res2).sum()
+        # print(f"per_mask_change={per_mask_change}, per_cell_change={per_cell_change}, number of changed pixels: {n_pixels}")
+
+    if save_path is not None:
+        tiff.imwrite(save_path, result.astype(np.uint16))
+
+    return result.astype(np.uint16)
