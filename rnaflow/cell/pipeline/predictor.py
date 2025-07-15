@@ -52,7 +52,8 @@ class CellPredictor(object):
         self.raw_data_dir = self.dst_dir / '01'
         self.pre_data_dir = self.dst_dir / 'PRE' / 'PRE_MUL'
         # self.gt_data_dir = self.dst_dir / '01_GT'
-        self.seg_data_dir = self.dst_dir / '01_SEG'
+        self.seg_data_dir_raw = self.dst_dir / '01_SEG'
+        self.seg_data_dir_curated = self.dst_dir / '01_SEG_curated'
         self.track_data_dir = self.dst_dir / '01_TRACK'
         self.cell_seq_dir = self.dst_dir / '01_CELL_SEQ'
 
@@ -85,6 +86,48 @@ class CellPredictor(object):
             
         self.pre_imgs_paths = sorted(self.pre_data_dir.glob('*.tif'))
 
+    # region Segmentation
+
+    @staticmethod
+    def segment_static(
+            input_paths: Union[Path, list],  # List of input image paths or a single path
+            method: str, 
+            exist_ok: bool = True,
+            seg_data_dir_raw: Optional[Path] = None,
+            seg_data_dir_curated: Optional[Path] = None,
+            **kwargs
+    ): 
+        """Static method to segment images using the specified method."""
+        assert method in ['cellpose-sam', 'sunrui-version'], f"Unsupported segmentation method: {method}"
+
+        if not seg_data_dir_raw.exists() or exist_ok:
+            seg_data_dir_raw.mkdir(parents=True, exist_ok=True)
+            seg_data_dir_curated.mkdir(parents=True, exist_ok=True)
+            logger.info('Begin segmenting images...')
+
+            if method == 'cellpose-sam':
+                module = importlib.import_module('.segment.cellpose_sam_api', package='rnaflow.cell.pipeline')
+                segment_fn = getattr(module, 'segment_fn')
+                segment_fn(
+                    input_paths,
+                    seg_data_dir_raw,
+                    seg_data_dir_curated,
+                    prefix='seg_'
+                )
+
+            elif method == 'sunrui-version':
+                module = importlib.import_module('.segment.sam_sr_api', package='rnaflow.cell.pipeline')
+                segment_fn = getattr(module, 'segment_fn')
+                segment_fn(
+                    input_paths,
+                    seg_data_dir_raw,
+                    seg_data_dir_curated,
+                    prefix='seg_',
+                    **kwargs
+                )
+
+            logger.info('Segmentation completed. Results saved to: %s', seg_data_dir_raw)
+
     def segment(
             self,
             method: str,
@@ -98,32 +141,36 @@ class CellPredictor(object):
         else:
             input_paths = self.raw_imgs_paths
             logger.info('Using raw images from directory: %s', self.raw_data_dir)
+
+        self.seg_data_dir_raw = self.seg_data_dir_raw / method
+        self.seg_data_dir_curated = self.seg_data_dir_curated / method
         
-        assert method in ['cellpose-sam'], f"Unsupported segmentation method: {method}"
+        self.segment_static(
+            input_paths=input_paths,
+            method=method,
+            exist_ok=exist_ok,
+            seg_data_dir_raw=self.seg_data_dir_raw,
+            seg_data_dir_curated=self.seg_data_dir_curated
+        )
 
-        self.seg_data_dir = self.dst_dir / '01_SEG' / method
-        if not self.seg_data_dir.exists() or exist_ok:
-            self.seg_data_dir.mkdir(parents=True, exist_ok=True)
-            logger.info('Begin segmenting images...')
+    # region Tracking
 
-            if method == 'cellpose-sam':
-                module = importlib.import_module('.segment.cellpose_sam_api', package='rnaflow.cell.pipeline')
-                segment_fn = getattr(module, 'segment_fn')
-                segment_fn(input_paths, self.seg_data_dir, self.device, prefix='seg_')
-
-            logger.info('Segmentation completed. Results saved to: %s', self.seg_data_dir)
-
-    def track(
-            self, 
-            method: str, 
-            exist_ok: bool = True
+    @staticmethod
+    def track_static(
+            method: str,  # Tracking method to use
+            raw_data_dir: Path,
+            mask_data_dir: Path,
+            exist_ok: bool = True,
+            device: str = 'cuda',
+            track_data_dir: Optional[Path] = None,
+            extract_cell_info: bool = True,
+            **kwargs
     ):
-        """Track the segmented images using the specified method."""
+        """Static method to track segmented images using the specified method."""
         assert method in ['cell-tracker-gnn', 'trackastra'], f"Unsupported tracking method: {method}"
-        
-        self.track_data_dir = self.dst_dir / '01_TRACK' / method
-        if not self.track_data_dir.exists() or exist_ok:
-            self.track_data_dir.mkdir(parents=True, exist_ok=True)
+
+        if not track_data_dir.exists() or exist_ok:
+            track_data_dir.mkdir(parents=True, exist_ok=True)
             logger.info('Begin tracking segmented images...')
 
             if method == 'cell-tracker-gnn':
@@ -131,14 +178,35 @@ class CellPredictor(object):
             elif method == 'trackastra':
                 module = importlib.import_module('.track.trackastra_api', package='rnaflow.cell.pipeline')
                 track_fn = getattr(module, 'cell_track')
-                track_fn(self.raw_data_dir, self.seg_data_dir, self.device, self.track_data_dir)
+                track_fn(raw_data_dir, mask_data_dir, device, track_data_dir)
 
-            logger.info('Tracking completed. Results saved to: %s', self.track_data_dir)
+            logger.info('Tracking completed. Results saved to: %s', track_data_dir)
 
-            # Extract cell statistics from the tracking results
-            logger.info('Extracting cell statistics from frames...')
-            extract_cell_statistis_from_frames(self.raw_data_dir, self.track_data_dir)
-            logger.info('Cell statistics extraction completed. Results saved to: %s', self.track_data_dir)
+            if extract_cell_info:
+                # Extract cell statistics from the tracking results
+                logger.info('Extracting cell statistics from frames...')
+                extract_cell_statistis_from_frames(raw_data_dir, track_data_dir)
+                logger.info('Cell statistics extraction completed. Results saved to: %s', track_data_dir)
+
+    def track(
+            self, 
+            method: str, 
+            exist_ok: bool = True
+    ):
+        """Track the segmented images using the specified method."""
+        
+        self.track_data_dir = self.track_data_dir / method
+
+        self.track_static(
+            method=method,
+            raw_data_dir=self.raw_data_dir,
+            mask_data_dir=self.seg_data_dir_curated,
+            exist_ok=exist_ok,
+            device=self.device,
+            track_data_dir=self.track_data_dir
+        )
+
+    # region Post-processing
 
     def extract_cell_seq(self, exist_ok: bool = True):
         """Post-process the tracking results to extract cell statistics and sequences."""
