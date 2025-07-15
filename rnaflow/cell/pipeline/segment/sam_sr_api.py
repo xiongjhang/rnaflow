@@ -5,11 +5,14 @@ from pathlib import Path
 from tqdm import tqdm
 import logging
 
+import torch
 import cv2
 import numpy as np
 import tifffile as tiff
 from skimage.measure import regionprops
-from mmdet.apis import init_detector, inference_detector
+
+# from mmdet.apis import init_detector, inference_detector
+from ultralytics import YOLO
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 
 from rnaflow.cell.pipeline.utils import get_logger
@@ -17,55 +20,108 @@ from rnaflow.cell.pipeline.segment.mask_filter import correct_mask_fast
 
 logger = get_logger(__name__, level=logging.INFO)
 
-detector_checkpoint = {
-    "model_name": {
-        'config': "/root/cell_track/bash/config.py",
-        "checkpoint": "/root/cell_track/bash/best_coco_bbox_mAP_epoch_180.pth", 
-        'threshold': 0.1,  # default threshold for bbox detection
+SAM_CHECKPOINT = {
+    "vit_b": "/mnt/sda/xjh/pt/sam/sam_vit_b_01ec64.pth",
+    "vit_l": "/mnt/sda/xjh/pt/sam/sam_vit_l_0b3195.pth",
+    "vit_h": "/mnt/sda/xjh/pt/sam/sam_vit_h_4b8939.pth",
+}
+
+YOLO_WEIGHT_CONFIG = {
+    "yolov5x": {
+        "Fluo-N2DH-SIM+": "/mnt/sda/cell_data_xjh/clx/experiments/train/yolov5x6u_Fluo-N2DH-SIM+4/weights/best.pt",
+        "Fluo-N2DL-HeLa": "/mnt/sda/cell_data_xjh/clx/experiments/train/yolov5x6u_Fluo-N2DL-HeLa/weights/best.pt",
+        "sunrui": "/mnt/sda/cell_data_xjh/clx/experiments/train/yolov5x6u_sunri/weights/best.pt",
+        "Hybrid": "/mnt/sda/cell_data_xjh/clx/experiments/train/yolov5x6u_all_dataset/weights/best.pt",
+    },
+    "yolov8x": {
+        "Fluo-N2DH-SIM+": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DH-SIM+/weights/best.pt",
+        "Fluo-N2DL-HeLa": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DL-HeLa/weights/best.pt",
+        "sunrui": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_sunri/weights/best.pt",
+        "Hybrid": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov8x_all_dataset/weights/best.pt",
+    },
+    "yolov11x": {
+        "Fluo-N2DH-SIM+": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DH-SIM+",
+        "Fluo-N2DL-HeLa": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DL-HeLa",
+        "sunrui": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_sunri/weights/best.pt",
+        "Hybrid": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_all_dataset/weights/best.pt",
+    },
+}
+
+MMDET_CONFIG = {
+    "yolov8": {
+        "config": "/root/cell_track/bash/config.py",
+        "checkpoint": "/root/cell_track/bash/best_coco_bbox_mAP_epoch_180.pth",
     }
 }
 
-def yolov8_mmdet(**kwargs):
-    detector = ...
-    return detector
-
 def prepare(
-        sam_checkpoint: Union[str, Path] = "/root/cell_track/bash/segment-anything/notebooks/sam_vit_h_4b8939.pth",
+        det_exp_name,
+        detector_type: str = "mmdet",
+        detector_name: str = "yolov8",
         sam_model_type: str = "vit_h",
-        detector_checkpoint: Union[str, Path] = "/root/cell_track/bash/best_coco_bbox_mAP_epoch_180.pth",
-        detector_config: Union[str, Path] = "/root/cell_track/bash/config.py",
         device: str = "cuda",
 ):
     # seg model
     logger.info(f"Loading sam model...")
-    sam = sam_model_registry[sam_model_type](checkpoint=sam_checkpoint)
+    sam = sam_model_registry[sam_model_type](checkpoint=SAM_CHECKPOINT[sam_model_type])
     sam.to(device=device)
     sam_predictor = SamPredictor(sam)
+
     # dect model
     logger.info(f"Loading detector model...")
-    detector = init_detector(detector_config, detector_checkpoint, device=device)
+    if detector_type == "mmdet":
+        config = MMDET_CONFIG[detector_name]["config"]
+        checkpoint = MMDET_CONFIG[detector_name]["checkpoint"]
+        # detector = init_detector(config, checkpoint, device=device)
+        detector = None
+    elif detector_type == "yolo":
+        checkpoint = YOLO_WEIGHT_CONFIG[detector_name][det_exp_name]
+        detector = YOLO(checkpoint)
+    else:
+        raise ValueError(f"Unsupported detector type: {detector_type}. Supported types are 'mmdet' and 'yolo'.")
 
     return sam_predictor, detector  
 
 def run_detect(
         detector, 
-        img_rgb_path: str, 
+        detector_type: str,  
+        img_rgb_path: Path, 
         threshold: float, 
-        check_box_iou: bool = True
+        check_box_iou: bool = True,
+        save_annotated: bool = False
 ):
     '''Run the detection model on the input image and filter bounding boxes based on a score threshold.'''
     img_rgb = tiff.imread(img_rgb_path)
     assert img_rgb.ndim == 3, f"Input image must be a 3D array, got shape {img_rgb.shape}"
 
     # run detection
-    res = inference_detector(detector, img_rgb_path)
-    bbox_raw = res.pred_instances.bboxes  # TODO: which type
-    score = res.pred_instances.scores  # TODO: which type
+    # TODO: plot box on raw image
+    if detector_type == "mmdet":
+        # res = inference_detector(detector, img_rgb_path)
+        res = None
+        bbox_raw = res.pred_instances.bboxes  # TODO: which type
+        score = res.pred_instances.scores  # TODO: which type
+        bbox_raw = bbox_raw.cpu().numpy()
+
+    elif detector_type == "yolo":
+        results = detector(img_rgb, conf = threshold)
+        boxes = results[0].boxes
+        if isinstance(boxes.xywh, torch.Tensor):
+            bbox_raw = boxes.xywh.cpu().numpy()
+            score = boxes.conf.cpu().numpy()
+        else:
+            bbox_raw = boxes.xywh
+            score = boxes.conf
+        bbox_raw = xywh2xyxy(bbox_raw)
+
+        if save_annotated:
+            annotated_image = results[0].plot()
+            annotated_image_path = img_rgb_path.parent / f"annotated_{img_rgb_path.name}"
+            cv2.imwrite(annotated_image_path, annotated_image)
 
     if not threshold:
         return bbox_raw, score
     else:
-        bbox_raw = bbox_raw.cpu().numpy()
         bbox_filter = []
         for i in range(bbox_raw.shape[0]):
             if score[i] > threshold:
@@ -122,6 +178,7 @@ def run_segment_with_bbox(
 # Pure inference function for segmenting images
 def seg_per_frame(
         detector,
+        detector_type,
         predictor,
         img_path: Path,
         img_rgb_path: Path,
@@ -147,12 +204,16 @@ def seg_per_frame(
         bbox_save: list of bounding boxes used for segmentation.
     """
     img = tiff.imread(img_path)
+    # img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     assert img.ndim == 2, f"Input image must be a 2D array, got shape {img.shape}"
 
     if not img_rgb_path.exists():
         # convert to rgb and save
+        assert img.dtype == np.uint16, f"Input image must be a uint16 array, got dtype {img.dtype}"
         img_rgb = gray_to_rgb(img, min_value=np.min(img), max_value=np.max(img))
         tiff.imwrite(img_rgb_path, img_rgb)
+    else:
+        img_rgb = tiff.imread(img_rgb_path)
 
     # which bbox to use
     if using_prompt:
@@ -162,8 +223,7 @@ def seg_per_frame(
             raise ValueError("Using prompt but no box_prompt provided.")
     else:
         # run detection
-        bbox_filter, score = run_detect(detector, img_rgb_path, threshold, check_distance)
-
+        bbox_filter, score = run_detect(detector, detector_type, img_rgb_path, threshold, check_distance)
         box_input = bbox_filter
     assert isinstance(box_input, np.ndarray), f"box_input must be a numpy array, got {type(box_input)}"
 
@@ -179,6 +239,8 @@ def seg_per_frame(
         if mask_segment is not None:
             gray_index = i + 1
             mask[mask_segment] = gray_index
+
+            # Which prompt used from previous segmentations?
             # version 1: save box prompt
             # bbox_save.append([bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]])
             # version 2: save box from mask
@@ -191,12 +253,16 @@ def segment_fn(
         input: Union[Path, List[Path]],
         save_raw_dir: Path,
         save_curated_dir: Path,
-        device: str,
+        device: str = 'cuda',
         prefix: str = 'frame_',
         batch_size: Optional[int] = None,
+        detector_type: str = "mmdet",
+        detector_name: str = "yolov8",
+        det_exp_name: str = "hybrid",
+        sam_model_type: str = "vit_h",
+        using_pre_frame_prompt: bool = False,
 ):
     """Segment an image using the Cellpose model."""
-    # TODO: support mask filter
     # TODO: support batch inference
 
     if isinstance(input, Path):
@@ -204,32 +270,40 @@ def segment_fn(
     img_paths = input
     
     # get model
-    segmentor, detector = prepare()
+    segmentor, detector = prepare(
+        det_exp_name=det_exp_name,
+        detector_type=detector_type,
+        detector_name=detector_name,
+        sam_model_type=sam_model_type,
+        device=device,
+    )
     
     # model inference
-    bbox_input = None
-    using_prompt = False
+    bbox_input = None   # first frame only have detector bbox as prompt
     for idx, img_path in tqdm(enumerate(img_paths), desc='Segmenting images', unit='image'):
-        img_pre_dir = img_path.parent.parent
+        img_pre_dir = img_path.parent
         img_rgb_path = img_pre_dir / 'RGB' / img_path.name
+        img_rgb_path.parent.mkdir(parents=True, exist_ok=True)
 
         mask, bbox_save = seg_per_frame(
                     detector,
+                    detector_type,
                     segmentor, 
                     img_path,
                     img_rgb_path,
-                    using_prompt,
+                    using_pre_frame_prompt,
                     bbox_input,
                 )
+        bbox_input = bbox_save  # use the bbox from the previous frame as prompt for the next frame
         
         # mask = mask[0]  # get the first mask, assuming single image input
         dst_img_path = save_raw_dir / f'{prefix}{idx:04d}.tif'
         tiff.imwrite(str(dst_img_path), mask)
         
-        # correct mask
-        dst_img_path = save_curated_dir / f'{prefix}filter_{idx:04d}.tif'
-        empty_img = np.ones(shape=(1, 1))
-        mask = correct_mask_fast(empty_img, mask, dst_img_path)
+        # # correct mask
+        # dst_img_path = save_curated_dir / f'{prefix}filter_{idx:04d}.tif'
+        # empty_img = np.ones(shape=(1, 1))
+        # mask = correct_mask_fast(empty_img, mask, dst_img_path)
 
 
 # region utils
@@ -266,7 +340,9 @@ def _sam_predict(
 
 def uint16_to_uint8_maxmin(uint16_array, max_int, min_int):
     offset = 100
+    min_int = min_int - offset if min_int >= offset else 0
     min_int = max(min_int-offset,0)
+    max_int = max_int + offset if max_int <= 65535 - offset else 65535
     max_int = min(65535,max_int+offset)
     # print('min_int',min_int)
     # print('max_int',max_int)
@@ -295,7 +371,7 @@ def array_to_rgb(array):
 
 def gray_to_rgb(img: np.ndarray, min_value: int = 0, max_value: int = 65535) -> np.ndarray:
     if img.dtype == np.uint16:
-        img = uint16_to_uint8_maxmin(img, min_value, max_value)
+        img = uint16_to_uint8_maxmin(img, max_value, min_value)
     rgb_img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     return rgb_img
 
@@ -314,6 +390,30 @@ def mask_to_bbox(mask):
         # bboxes.append(bbox)
 
     return bbox
+
+def xywh2xyxy(bboxes):
+    """
+    将边界框从 xywh（中心坐标+宽高）格式转换为 x1y1x2y2（左上角+右下角）格式。
+    
+    参数:
+        bboxes: 形状为 [N, 4] 的 NumPy 数组，每行包含 [x, y, w, h]
+        
+    返回:
+        形状为 [N, 4] 的 NumPy 数组，每行包含 [x1, y1, x2, y2]
+    """
+    # 创建一个新数组存储转换后的边界框
+    bboxes_xyxy = np.zeros_like(bboxes)
+    
+    # 提取各列
+    x, y, w, h = bboxes[:, 0], bboxes[:, 1], bboxes[:, 2], bboxes[:, 3]
+    
+    # 转换计算
+    bboxes_xyxy[:, 0] = x - w / 2  # x1
+    bboxes_xyxy[:, 1] = y - h / 2  # y1
+    bboxes_xyxy[:, 2] = x + w / 2  # x2
+    bboxes_xyxy[:, 3] = y + h / 2  # y2
+    
+    return bboxes_xyxy
 
 def check_distance(box_raw, img, threshold_overlap=0.8, threshold_distance=5,threshold_overlap_single=0.9):                  #0.5 /25/ 0.8 10.10change
     """Sunrui filter method based on box"""
