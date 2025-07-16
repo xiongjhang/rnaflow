@@ -300,28 +300,23 @@ class SitePridector:
         new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
         coor_pd.rename(columns=new_columns, inplace=True)
         
-        if coor_pd.empty:
-            coor_pd['particle'] = None
-            patch_res = None
-            traj_res = None
-        else:
+        traj_res = None
+        cluster_centers = None
+        if not coor_pd.empty:
             # track filter fp
             patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
-            # normal fitler
             patch_res = tp.filter_stubs(patch_res, threshold)
             patch_res = patch_res.reset_index(drop=True)
-            return_patch_res = patch_res.copy()  # befor track filter for record data
+            coor_pd_filter = patch_res.copy()  # befor track filter for record data
 
-            if patch_res.empty:
-                coor_pd['particle'] = None
-                patch_res = None
-                traj_res = None
-            else:
+            if not coor_pd_filter.empty:
+                # cluster
                 traj_res, cluster_centers = link_cluster(patch_res)
+                # save cluster results
+                coor_pd_filter.to_csv(self.patch_coor_reg_path, index=False)
+                traj_res.to_csv(self.traj_coor_reg_path, index=False)
 
-            return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
-            traj_res.to_csv(self.traj_coor_reg_path, index=False)
-
+        # plot cluster centers
         reg_stack = tiff.imread(self.det_reg_path)[0]
         reg_stack_max_proj = max_projection(reg_stack)
         if cluster_centers is not None:
