@@ -21,8 +21,15 @@ def read_csv(csv_path: PathType) -> pd.DataFrame:
 
 
 class SitePridector:
-    '''An object for a single cell stack processing.
-    It is used to predict the cell site, track the cell site, and compute the intensity of the cell site.'''
+    '''Predictor for a single cell sequence processing.
+
+    Including site dection, cell registration, site linking and site intensity computation.
+    Designed for single cell sequence which has no site, one site or two sites.
+
+    Pay attention:
+        - For no site and one site sequence, using `site_track` method to link the detected coordinates.
+        - For two sites sequence, using `site_cluster` method to cluster the detected coordinates.
+    '''
 
     EXTENSIONS = ('csv')
     COLUMNS = [
@@ -33,13 +40,14 @@ class SitePridector:
             'det_reg': 'imgs_raw_mask_reg_rcs.tif',
             'det_coor_reg': 'cell_mask_reg.csv',
             'traj_coor_reg': 'trajectories_data.csv',
-            'patch_coor_reg': 'trajectories_data_raw.csv',
+            'patch_coor_reg': 'trajectories_data_patch.csv',
             'registration_transform': 'rigid_transforms_series.pkl'
     }
 
     def __init__(
             self,
             site_dir: Path,
+            device: Optional[str] = None,
         ):
 
         self.root = site_dir
@@ -60,15 +68,36 @@ class SitePridector:
         assert self.raw_stack.ndim == 3
         self.shape = self.raw_stack.shape
         self.num_frame, self.height, self.width = self.shape
+        assert self.height == 128 and self.width == 128, \
+            f"Expected image size 128x128, got {self.height}x{self.width}"
         # del raw_stack
 
-    # ======================
-    # region Pipeline Method
-    # ======================
+        if not device:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
 
-    def spotlearn_pred(self, model_path):
-        def _pred_img(net, img, device, out_threshold=0.5):
-            net.eval()
+    # region site dection
+
+    @staticmethod
+    def spotlearn_detect(
+        raw_stack: np.ndarray,
+        model_path: Union[str, Path],
+        out_threshold: float = 0.9,
+        device: Optional[str] = None,
+    ) -> np.ndarray:
+        '''Detect sites using Spotlearn model.'''
+        assert raw_stack.ndim == 3, f"Expected 3D array, got {raw_stack.ndim}D array"
+        assert raw_stack.dtype == np.float16, f"Expected float16 array, got {raw_stack.dtype} array"
+        mask_stack = np.zeros_like(raw_stack)
+
+        net = SpotlearnNet(1, 1).to(device)
+        checkpoint = torch.load(model_path, map_location='cpu')
+        net.load_state_dict(checkpoint["model_state_dict"])
+        # net = torch.nn.DataParallel(net)
+        # net.load_state_dict(checkpoint["model_state_dict"])
+        net.eval()
+
+        def _pred_img(net, img, device, out_threshold):
             img = spotlearn_norm(img)  # norm
             img = torch.from_numpy(img)
             img = img.unsqueeze(0)
@@ -93,26 +122,24 @@ class SitePridector:
 
             return output
 
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f'=======Current device: {device}')
-        net = SpotlearnNet(1, 1).to(device)
-        checkpoint = torch.load(model_path, map_location='cpu')
-        net.load_state_dict(checkpoint["model_state_dict"])
-        # net = torch.nn.DataParallel(net)
-        # net.load_state_dict(checkpoint["model_state_dict"])
-
-        mask_stack = np.zeros_like(self.raw_stack)
-        raw_stack = tiff.imread(self.raw_path).squeeze().astype('float32')
-        for i in range(self.num_frame):
-            mask = _pred_img(net, raw_stack[i], device, out_threshold=0.9)
-            mask_stack[i] = mask
+        for i in range(raw_stack.shape[0]):
+            mask_stack[i] = _pred_img(net, raw_stack[i], device, out_threshold)
 
         mask_stack = mask_stack * 65000
+        return mask_stack
+
+    def site_detect(self, model_path):
+        """Pipeline method for site detection."""
+        mask_stack = self.spotlearn_detect(
+            self.raw_stack, model_path, device=self.device
+        )
+
         det_raw = np.stack((self.raw_stack, mask_stack))
         tiff.imwrite(self.det_raw_path, det_raw, imagej=True)
 
+    # region cell registration
+
     def registration_recursive(self):
-        
         raw_stack = tiff.imread(self.raw_path).squeeze().astype('float32')
         mask_stack = tiff.imread(self.det_raw_path)[1]
         assert raw_stack.ndim == 3 and mask_stack.ndim == 3
@@ -160,10 +187,18 @@ class SitePridector:
         with open(self.reg_transform_path, 'wb') as file:
             pickle.dump(last_composite_transform, file)
 
-    def get_mask_coor_reg(self, rf_classifier_path, nn_classifier_path, min_region = 4, max_region = 12):
+    # region get site info
 
+    def get_mask_coor_reg(
+            self, 
+            rf_classifier_path, 
+            nn_classifier_path, 
+            min_region = 4, 
+            max_region = 12
+    ):
+        """Obtain the coordinates of the detected sites in the registered mask stack."""
         mask_reg_stack = tiff.imread(self.det_reg_path)[1]
-        assert mask_reg_stack.ndim == 3
+        assert mask_reg_stack.ndim == 3, "Expected 3D array, got {mask_reg_stack.ndim}D array"
 
         coor_pd = pd.DataFrame(columns=['x', 'y', 'frame', 
                                     # 'region', 'region_filer', 
@@ -179,21 +214,23 @@ class SitePridector:
             mask = measure.label(mask)
             properties = measure.regionprops(mask)
             for prop in properties:
-                coor_pd.loc[i, 'x'] = prop.centroid[1]
-                coor_pd.loc[i, 'y'] = prop.centroid[0]
+                coor_pd.loc[i, 'x'] = prop.centroid[1]  # x in fiji viewer
+                coor_pd.loc[i, 'y'] = prop.centroid[0]  # y in fiji viewer
                 coor_pd.loc[i, 'frame'] = frame
 
-                # coor_pd.loc[i, 'region'] = prop.area
-                # if prop.area <= min_region or prop.area >= max_region:
-                #     coor_pd.loc[i, 'region_filer'] = 1
-
+                if prop.area <= min_region or prop.area >= max_region:
+                    # coor_pd.loc[i, 'region_filer'] = 1
+                    continue
+                coor_pd.loc[i, 'area'] = prop.area
+                
+                # gaussian filter
                 x_value, y_value = prop.centroid[0], prop.centroid[1]
                 if frame != 0:    
                     (y_value, x_value) = global_transform[frame - 1].TransformPoint((y_value, x_value))
                 pic_gaussian, _, _ = get_pic(self.raw_stack[frame], x_value, y_value)
                 pic_fp, _, _ = get_pic(self.raw_stack[frame], x_value, y_value, 5)
-            
                 is_gaussian_filter, sigma = gaussian_filter(pic_gaussian)
+                # trained model filter
                 rf_res, nn_res = fp_filter(pic_fp, rf_model, nn_model)
 
                 if is_gaussian_filter:
@@ -202,7 +239,6 @@ class SitePridector:
                     coor_pd.loc[i, 'gaussian_sigma'] = sigma
                 if rf_res == 1:
                     coor_pd.loc[i, 'rf_filer'] = 1
-
                 thred = 0.69
                 if nn_res.item() > thred:
                     coor_pd.loc[i, 'nn_filer'] = 1
@@ -210,6 +246,13 @@ class SitePridector:
                 i += 1
         
         coor_pd.to_csv(self.det_coor_reg_path, index=False)
+    
+    # region site linking
+
+    def single_site_link(
+            coor_pd: pd.DataFrame,
+    ):
+        """"""
 
     def site_track(self, search_range=9, memory=5, threshold=2, method='filter_patch', chose_longest=False, frame_filter=False):
         coor_pd = read_csv(self.det_coor_reg_path)
@@ -296,6 +339,11 @@ class SitePridector:
                 longest_trajectory.to_csv(self.traj_coor_reg_path, index=False)
 
     def site_cluster(self, search_range=9, memory=5, threshold=2):
+        """Site cluster based on the tracked coordinates.
+        
+        Only used for the single cell sequence which has **2 sites**.
+        Args are uesd to filter the FPs from the detected coordinates.
+        """
         coor_pd = read_csv(self.det_coor_reg_path)
         new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
         coor_pd.rename(columns=new_columns, inplace=True)
@@ -327,64 +375,94 @@ class SitePridector:
             plt.axis('off')
             plt.savefig(self.root / 'imgs_raw_reg_rcs_max_projection.png', bbox_inches='tight', pad_inches=0, dpi=300)
 
-    def compute_intensity(self, double=False, plot_intensity=True, random_sample_when_zero=True):
+    # region site stastic computation
 
-        def _plot(df, dst_path, col='photon_number'):
-            fig, ax = plt.subplots()
-            df[col].plot(kind='line', xlabel='Frame', ylabel=col, ax=ax)
-            plt.savefig(dst_path, format='png')
-            ax.cla()
+    @staticmethod
+    def plot_intensity(df, dst_path, col='photon_number'):
+        """Plot the intensity data and save it as a PNG file."""
+        fig, ax = plt.subplots()
+        df[col].plot(kind='line', xlabel='Frame', ylabel=col, ax=ax)
+        plt.savefig(dst_path, format='png')
+        ax.cla()
 
-        def empty_compute_intensity(raw_stack, rigid_transform, num_frame, csv_suffix):
-            traj_res, _ = empty_compute(raw_stack, rigid_transform, num_frame)
-            dst_path = self.root / f'{csv_suffix}'
+    @staticmethod
+    def compute_bg_intensity(
+            raw_stack: np.ndarray,
+            rigid_transform: list,
+            num_frame: int,
+            res_dst_path: Path,
+            plot_intensity: bool = True,
+    ):
+        """Compute the background intensity of fake tracked sites."""
+        traj_res, _ = empty_compute(raw_stack, rigid_transform, num_frame)
+        traj_res.to_csv(res_dst_path, index=False)
+
+        if plot_intensity:
+            plot_intensity(traj_res, res_dst_path.with_suffix('.png'))
+    
+    @staticmethod
+    def compute_tracked_intensity(
+        raw_stack: np.ndarray,
+        rigid_transform: list,
+        num_frame: int,
+        track_res: pd.DataFrame, 
+        res_dst_dir: Path,
+        random_sample_when_zero: bool = True,
+        plot_intensity: bool = True,
+    ):
+        """Compute the intensity of the tracked sites."""
+        assert not track_res['particle'].empty, "The track_res DataFrame is empty."
+        assert res_dst_dir.is_dir(), f"Output directory {res_dst_dir} does not exist."
+
+        traj_num = int(track_res['particle'].max())
+        for traj_id in range(traj_num + 1):
+            # Create a boolean mask for rows with the specified particle value
+            mask = track_res['particle'] == traj_id
+            # Filter the DataFrame using the mask
+            traj_tp_data = track_res[mask]
+            traj_tp_data = traj_tp_data.reset_index(drop=True)
+
+            traj_res, _ = traj_compute(traj_tp_data, raw_stack, rigid_transform, num_frame, random_sample_when_zero)
+            res_dst_path = res_dst_dir / ('dataAnalysis_tj_' + str(traj_id) + '_withBg.csv')
             traj_res.to_csv(dst_path, index=False)
 
             if plot_intensity:
                 dst_path = dst_path.with_suffix('.png')
-                _plot(traj_res, dst_path)
+                plot_intensity(traj_res, res_dst_path.with_suffix('.png'))
 
+    def compute_intensity(self, site2=False, plot_intensity=True, random_sample_when_zero=True):
+        """Pipelien method to compute the intensity of the tracked sites."""
         raw_stack = tiff.imread(self.det_raw_path)[0]
         rigid_transform = get_global_transform(self.reg_transform_path, self.num_frame)
 
-        if not self.traj_coor_reg_path.exists():
-            # empty computation
-            if not double:
-                empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_withBg.csv')
-            else:
-                empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_0_withBg.csv')
-                empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_1_withBg.csv')
-
-        else:
+        fake_track: bool = True
+        if self.traj_coor_reg_path.exists():
             track_res = read_csv(self.traj_coor_reg_path)
-
-            if track_res['particle'].empty:
-                # empty computation
-                if not double:
-                    empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_withBg.csv')
-                else:
-                    empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_0_withBg.csv')
-                    empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_1_withBg.csv')
-
+            if not track_res['particle'].empty:
+                fake_track = False
+        
+        if fake_track:
+            if not site2:
+                self.compute_bg_intensity(
+                    raw_stack, rigid_transform, self.num_frame, 
+                    self.root / 'dataAnalysis_tj_empty_withBg.csv', plot_intensity=plot_intensity
+                )
             else:
-                traj_num = int(track_res['particle'].max())
-                for traj_id in range(traj_num + 1):
-                    # Create a boolean mask for rows with the specified particle value
-                    mask = track_res['particle'] == traj_id
-                    # Filter the DataFrame using the mask
-                    traj_tp_data = track_res[mask]
-                    traj_tp_data = traj_tp_data.reset_index(drop=True)
-
-                    traj_res, _ = traj_compute(traj_tp_data, raw_stack, rigid_transform, self.num_frame, random_sample_when_zero)
-                    dst_path = self.root / ('dataAnalysis_tj_' + str(traj_id) + '_withBg.csv')
-                    traj_res.to_csv(dst_path, index=False)
-
-                    if plot_intensity:
-                        dst_path = dst_path.with_suffix('.png')
-                        _plot(traj_res, dst_path)
-                
-                if double:
-                    empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_withBg.csv')
+                self.compute_bg_intensity(
+                    raw_stack, rigid_transform, self.num_frame, 
+                    self.root / 'dataAnalysis_tj_empty_0_withBg.csv', plot_intensity=plot_intensity
+                )
+                self.compute_bg_intensity(
+                    raw_stack, rigid_transform, self.num_frame, 
+                    self.root / 'dataAnalysis_tj_empty_1_withBg.csv', plot_intensity=plot_intensity
+                )
+        else:
+            self.compute_tracked_intensity(
+                raw_stack, rigid_transform, self.num_frame,
+                track_res, self.root,
+                random_sample_when_zero=random_sample_when_zero,
+                plot_intensity=plot_intensity
+            )
 
     # ====================
     # region Helper Method
