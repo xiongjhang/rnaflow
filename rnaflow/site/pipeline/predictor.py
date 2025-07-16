@@ -15,15 +15,14 @@ from pipeline.spotlearn import SpotlearnNet
 from pipeline.utils import *
 
 
-__class = ['Tracker', 'Celler', 'Trajer']
-
 def read_csv(csv_path: PathType) -> pd.DataFrame:
     '''Read csv from given path'''
     return pd.read_csv(csv_path, index_col=False)
 
 
-class CellFolder:
-    '''An object for a single cell stack'''
+class SitePridector:
+    '''An object for a single cell stack processing.
+    It is used to predict the cell site, track the cell site, and compute the intensity of the cell site.'''
 
     EXTENSIONS = ('csv')
     COLUMNS = [
@@ -40,16 +39,14 @@ class CellFolder:
 
     def __init__(
             self,
-            dir_path: Path,
-            gpu = '0',
+            site_dir: Path,
         ):
 
-        self.root = dir_path
+        self.root = site_dir
         assert self.root.is_dir() # and self.root.exists()
         self.dir_name = self.root.parts[-1]#.split('-')[-1]   # cellraw_xxx
         self.cell_idx = self.dir_name.split('_')[-1]
 
-        # file
         self.raw_path = self.root / (self.dir_name + '.tif')  # raw cell stack 
         self.label_path = self.root / (self.dir_name + '_mask.tif')  # mask label stack
         self.det_raw_path = self.root / self.File_Dict['det_raw']  # raw mask stack
@@ -65,9 +62,9 @@ class CellFolder:
         self.num_frame, self.height, self.width = self.shape
         # del raw_stack
 
-    # ===============
-    # pipeline Method
-    # ===============
+    # ======================
+    # region Pipeline Method
+    # ======================
 
     def spotlearn_pred(self, model_path):
         def _pred_img(net, img, device, out_threshold=0.5):
@@ -186,7 +183,6 @@ class CellFolder:
                 coor_pd.loc[i, 'y'] = prop.centroid[0]
                 coor_pd.loc[i, 'frame'] = frame
 
-                # region filter
                 # coor_pd.loc[i, 'region'] = prop.area
                 # if prop.area <= min_region or prop.area >= max_region:
                 #     coor_pd.loc[i, 'region_filer'] = 1
@@ -225,7 +221,6 @@ class CellFolder:
             patch_res = None
             traj_res = None
         else:
-            # track filter fp
             patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
             # normal fitler
             patch_res = tp.filter_stubs(patch_res, threshold)
@@ -263,10 +258,8 @@ class CellFolder:
                 else:
                     raise ValueError
 
-
                 return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
                 traj_res.to_csv(self.traj_coor_reg_path, index=False)
-
 
     def site_track_label(self, search_range=9, memory=5, threshold=2, chose_longest=False, frame_filter=False):
         coor_pd = read_csv(self.det_coor_reg_path)
@@ -398,9 +391,9 @@ class CellFolder:
                 if double:
                     empty_compute_intensity(raw_stack, rigid_transform, self.num_frame, 'dataAnalysis_tj_empty_withBg.csv')
 
-    # =============
-    # Helper Method
-    # =============
+    # ====================
+    # region Helper Method
+    # ====================
 
     def get_mask_from_track(
             self,
