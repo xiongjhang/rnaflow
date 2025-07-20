@@ -483,10 +483,17 @@ def fp_filter(pic, rf_model=None, nn_model=None):
 
 # region Trajectory
 
-def track_filter(track_data: pd.DataFrame, patch_len = [2, 3], search_range=3, memory=3):
-    '''对于长度在patch_len的patch进行距离和时间的限制，并过滤超过范围的patch
+def short_patch_filter(
+        track_data: pd.DataFrame, 
+        patch_len = [2, 3], 
+        search_range=3, 
+        memory=3
+) -> pd.DataFrame:
+    '''Filter patches which length in `patch_len` do not meet the following criteria:
+        
+    1. The distance between consecutive frames is less than or equal to search_range.
+    2. The time difference between consecutive frames is less than or equal to memory.
     '''
-    
     valid_particles = []
     grouped = track_data.groupby('particle')
 
@@ -508,10 +515,9 @@ def track_filter(track_data: pd.DataFrame, patch_len = [2, 3], search_range=3, m
     filtered_data = track_data[track_data['particle'].isin(valid_particles)]
     return filtered_data
 
-def frame_filter_(track_data: pd.DataFrame):
-    '''在每个帧(frame)中，只保留粒子ID最小的那个粒子，其他粒子都被标记为无效并过滤掉
-    '''
-
+def save_smallest_id_filter(track_data: pd.DataFrame):
+    '''In each frame, only the particle with the smallest ID is retained,
+    and all other particles are marked as invalid and filtered out.'''
     invalid_particles = set()
     grouped = track_data.groupby('frame')
 
@@ -529,10 +535,12 @@ def frame_filter_(track_data: pd.DataFrame):
     return filtered_data
 
 def filter_overlapping_frames(track_data: pd.DataFrame):
-    '''
-    处理轨迹在时间上的重叠问题：
-    - 当多个轨迹在同一帧出现时，只保留最长轨迹（按行数计算）在该帧的数据。
-    - 较短轨迹仅删除重叠帧的数据，非重叠部分仍保留。
+    '''Filter overlapping frames in trajectory data.
+
+    1. If multiple particles appear in the same frame,
+        only the longest trajectory (by number of rows) is kept for that frame.
+    2. Shorter trajectories only have their overlapping frame data removed,
+        while their non-overlapping parts are retained.
     '''
     # 计算每条轨迹的总行数（长度）
     traj_lengths = track_data['particle'].value_counts().rename('length')
@@ -555,7 +563,12 @@ def filter_overlapping_frames(track_data: pd.DataFrame):
     result = pd.concat(filtered_data).drop(columns=['length'])
     return result.sort_values(['particle', 'frame'])
 
-def link_patches(data, search_range, memory):
+def link_patches(
+        data: pd.dataframe, 
+        search_range, 
+        memory
+):
+    """"""
     linked_trajectories = {}  # 存储已链接的轨迹
     # {0: [[49.5, 60.5, 0], [46.388888888888886, 60.22222222222222, 1], [46.66666666666666, 61.0, 2]]}
 

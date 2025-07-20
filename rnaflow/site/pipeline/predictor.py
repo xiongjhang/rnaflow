@@ -248,95 +248,138 @@ class SitePridector:
         coor_pd.to_csv(self.det_coor_reg_path, index=False)
     
     # region site linking
-
+    @staticmethod
     def single_site_link(
             coor_pd: pd.DataFrame,
+            num_frame: int,
+            search_range: int = 9,
+            memory: int = 5,
+            patch_thres: int = 2,
+            link_strategy: Literal['filter_patch', 'link_patch'] = 'link_patch',
+            save_smallest_id: bool = False,
+            save_longest_traj: bool = False
+    )-> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """Site tracking for cell sequence with single site.
+
+        If tracking result is empty, return None.
+
+        Args:
+            coor_pd (pd.DataFrame): DataFrame containing the coordinates of detected sites.
+                                    Required columns: 'x [px]', 'y [px]', 'z'.
+            num_frame (int): Number of frames in the sequence.
+            search_range (int): Search range for linking sites.
+            memory (int): Memory parameter for linking sites.
+            patch_thres (int): Threshold for filtering short tracks.
+        """
+        patch_res = None
+        # patch generation and filter
+        if not coor_pd.empty:
+            patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
+            
+            # very short patch filter (length < patch_thres)
+            patch_res = tp.filter_stubs(patch_res, patch_thres)
+            patch_res = patch_res.reset_index(drop=True)
+            return_patch_res = patch_res.copy()  # before track filter for record data
+
+            # short patch filter based on distance and memory,
+            # define short patch creteria here, which shoule be save
+            patch_res = short_patch_filter(
+                patch_res, patch_len=[2, 3], search_range=6, memory=3
+            )
+            patch_res = patch_res.reset_index(drop=True)
+
+        if patch_res is None or patch_res.empty:
+            return None, None
+
+        # link patches to trajectories
+        if link_strategy == 'link_patch':
+            has_duplicates = patch_res['frame'].duplicated().any()
+            # link patches
+            traj_res = link_patches(patch_res, search_range=40, memory=20)
+            traj_res = link_patches(traj_res, search_range=20, memory=50)
+            traj_res = link_patches(traj_res, search_range=15, memory=100)
+            traj_res = link_patches(traj_res, search_range=10, memory=num_frame)
+
+            if save_smallest_id:
+                # traj_res = traj_res.loc[traj_res.groupby('frame')['particle'].idxmin()]
+                traj_res = save_smallest_id_filter(traj_res)    
+            if save_longest_traj:
+                traj_res = tp.link_df(traj_res, search_range=150, memory=num_frame)
+
+        elif link_strategy == 'filter_patch':
+            traj_res = filter_overlapping_frames(patch_res)
+            traj_res['particle'] = 0
+
+        else:
+            raise ValueError("Invalid link strategy. Choose 'filter_patch' or 'link_patch'.")
+
+        return return_patch_res, traj_res
+
+    def site_track(
+            self,
+            search_range: int = 9, 
+            memory: int = 5, 
+            threshold: int = 2, 
+            link_strategy: Literal['filter_patch', 'link_patch'] = 'link_patch',
+            save_smallest_id: bool = False,
+            save_longest_traj: bool = False
+        ):
+        coor_pd = read_csv(self.det_coor_reg_path)
+        new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
+        coor_pd.rename(columns=new_columns, inplace=True)
+
+        return_patch_res, traj_res = self.single_site_link(
+            coor_pd, self.num_frame, search_range, memory, threshold, 
+            link_strategy, save_smallest_id, save_longest_traj
+        )
+
+        return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
+        traj_res.to_csv(self.traj_coor_reg_path, index=False)
+
+
+    @staticmethod
+    def single_site_link_label(
+            coor_pd: pd.DataFrame,
+            num_frame: int,
+            search_range: int = 9,
+            memory: int = 5,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """Site tracking for cell sequence with single site and accurate site mask label."""
+        patch_res = None
+        if not coor_pd.empty:
+            patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
+        
+        if patch_res is None or patch_res.empty:
+            return None, None
+        
+        has_duplicates = patch_res['frame'].duplicated().any()
+        # if has_duplicates:
+        #     raise ValueError('There are duplicates in the patch results.')
+        
+        traj_res = tp.link_df(patch_res, search_range=150, memory=num_frame)
+        particle_frame_counts = traj_res.groupby('particle')['frame'].count()
+        longest_particle = particle_frame_counts.idxmax()
+        longest_trajectory = traj_res[traj_res['particle'] == longest_particle]
+        longest_trajectory = longest_trajectory.reset_index(drop=True)
+
+        return patch_res, longest_trajectory
+
+    def site_track_label(
+            self, 
+            search_range=9, 
+            memory=5, 
     ):
-        """"""
-
-    def site_track(self, search_range=9, memory=5, threshold=2, method='filter_patch', chose_longest=False, frame_filter=False):
         coor_pd = read_csv(self.det_coor_reg_path)
         new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
         coor_pd.rename(columns=new_columns, inplace=True)
 
-        if coor_pd.empty:
-            coor_pd['particle'] = None
-            patch_res = None
-            traj_res = None
-        else:
-            patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
-            # normal fitler
-            patch_res = tp.filter_stubs(patch_res, threshold)
-            patch_res = patch_res.reset_index(drop=True)
-            return_patch_res = patch_res.copy()  # befor track filter for record data
-            # track filter
-            patch_res = track_filter(patch_res, search_range=6, memory=3)
-            patch_res = patch_res.reset_index(drop=True)
+        patch_res, longest_trajectory = self.single_site_link_label(
+            coor_pd, self.num_frame, search_range, memory
+        )
 
-            if patch_res.empty:
-                coor_pd['particle'] = None
-                patch_res = None
-                traj_res = None
-            else:
-                # method1: link patches
-                if method == 'filter patch':
-                    has_duplicates = patch_res['frame'].duplicated().any()
+        patch_res.to_csv(self.patch_coor_reg_path, index=False)
+        longest_trajectory.to_csv(self.traj_coor_reg_path, index=False)
 
-                    traj_res = link_patches(patch_res.copy(), search_range=40, memory=20)
-                    traj_res = link_patches(traj_res, search_range=20, memory=50)
-                    traj_res = link_patches(traj_res, search_range=15, memory=100)
-                    traj_res = link_patches(traj_res, search_range=10, memory=self.num_frame)
-                    
-                    if frame_filter:
-                        # traj_res = traj_res.loc[traj_res.groupby('frame')['particle'].idxmin()]
-                        traj_res = frame_filter_(traj_res)
-
-                    if chose_longest:
-                        traj_res = tp.link_df(traj_res, search_range=150, memory=self.num_frame)
-        
-                # method2: do not link patches
-                elif method == 'link patch':
-                    traj_res = filter_overlapping_frames(patch_res)
-                    traj_res['particle'] = 0
-                else:
-                    raise ValueError
-
-                return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
-                traj_res.to_csv(self.traj_coor_reg_path, index=False)
-
-    def site_track_label(self, search_range=9, memory=5, threshold=2, chose_longest=False, frame_filter=False):
-        coor_pd = read_csv(self.det_coor_reg_path)
-        new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
-        coor_pd.rename(columns=new_columns, inplace=True)
-
-        if coor_pd.empty:
-            coor_pd['particle'] = None
-            patch_res = None
-            traj_res = None
-        else:
-            # track filter fp
-            patch_res = tp.link_df(coor_pd, search_range=search_range, memory=memory)
-            return_patch_res = patch_res.copy()
-
-            if patch_res.empty:
-                coor_pd['particle'] = None
-                patch_res = None
-                traj_res = None
-            else:
-                has_duplicates = patch_res['frame'].duplicated().any()
-
-                # if has_duplicates:
-                #     raise ValueError('has duplicates')
-
-                traj_res = tp.link_df(patch_res, search_range=150, memory=self.num_frame)
-
-                particle_frame_counts = traj_res.groupby('particle')['frame'].count()
-                longest_particle = particle_frame_counts.idxmax()
-                longest_trajectory = traj_res[traj_res['particle'] == longest_particle]
-                longest_trajectory = longest_trajectory.reset_index(drop=True)
-        
-                return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
-                longest_trajectory.to_csv(self.traj_coor_reg_path, index=False)
 
     def site_cluster(self, search_range=9, memory=5, threshold=2):
         """Site cluster based on the tracked coordinates.
