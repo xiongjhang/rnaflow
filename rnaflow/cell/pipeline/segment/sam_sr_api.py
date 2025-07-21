@@ -40,8 +40,8 @@ YOLO_WEIGHT_CONFIG = {
         "Hybrid": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov8x_all_dataset/weights/best.pt",
     },
     "yolov11x": {
-        "Fluo-N2DH-SIM+": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DH-SIM+",
-        "Fluo-N2DL-HeLa": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DL-HeLa",
+        "Fluo-N2DH-SIM+": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DH-SIM+/weights/best.pt",
+        "Fluo-N2DL-HeLa": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_Fluo_N2DL-HeLa/weights/best.pt",
         "sunrui": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_sunri/weights/best.pt",
         "Hybrid": "/mnt/sda/cell_data_xjh/wfh/shiyan/runs/yolov11x_all_dataset/weights/best.pt",
     },
