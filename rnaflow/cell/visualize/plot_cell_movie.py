@@ -6,6 +6,7 @@ from os.path import join
 import tifffile as tiff
 import cv2
 import numpy as np
+from collections import defaultdict
 
 from ctc_metrics.utils.filesystem import read_tracking_file
 
@@ -41,6 +42,9 @@ def visualize(
         border_width: str = None,
         show_labels: bool = True,
         show_parents: bool = True,
+        show_trajectories: bool = True,
+        trajectory_length: int = 10,
+        trajectory_thickness: int = 2,
         ids_to_show: list = None,
         start_frame: int = 0,
         framerate: int = 30,
@@ -66,6 +70,12 @@ def visualize(
             Print instance labels to the output.
         show_parents: bool
             Print parent labels to the output.
+        show_trajectories: bool
+            Show movement trajectories of the instances.
+        trajectory_length: int
+            Number of previous frames to show in the trajectory.
+        trajectory_thickness: int
+            Thickness of the trajectory lines.
         ids_to_show: list
             The IDs of the instances to show. All others will be ignored.
         start_frame: int
@@ -95,15 +105,19 @@ def visualize(
     # Load image and tracking data
     images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")]
     results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")]
-    parents = {
-        l[0]: l[3] for l in read_tracking_file(join(res_dir, "res_track.txt"))
-    }
+    tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
+    parents = {l[0]: l[3] for l in tracking_data}
 
     # Create visualization directory
     if viz_dir:
         makedirs(viz_dir, exist_ok=True)
 
     video_writer = None
+    
+    # Initialize trajectory tracking
+    trajectory_history = defaultdict(list)
+    max_trajectory_length = trajectory_length
+    base_trajectory_thickness = trajectory_thickness
 
     # Loop through all images
     while start_frame < len(images):
@@ -117,15 +131,47 @@ def visualize(
         p1, p99 = np.percentile(img, (1, 99))
         img = np.clip((img - p1) / max(p99 - p1, 1e-5) * 255, 0, 255).astype(np.uint8)
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        res_img = tiff.imread(res_path).squeeze()
+        
+        # Update trajectory history
+        if show_trajectories:
+            current_centers = {}
+            for i in np.unique(res_img):
+                if i == 0:
+                    continue
+                mask = res_img == i
+                y, x = np.where(mask)
+                center = (int(np.mean(x)), int(np.mean(y)))
+                current_centers[i] = center
+                
+            # Update history for existing trajectories
+            for obj_id in list(trajectory_history.keys()):
+                if obj_id in current_centers:
+                    trajectory_history[obj_id].append(current_centers[obj_id])
+                    # Trim to max length
+                    if len(trajectory_history[obj_id]) > max_trajectory_length:
+                        trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
+                else:
+                    # Remove trajectories for objects that disappeared
+                    del trajectory_history[obj_id]
+            
+            # Add new objects
+            for obj_id in current_centers:
+                if obj_id not in trajectory_history:
+                    trajectory_history[obj_id] = [current_centers[obj_id]]
+
         viz = create_colored_image(
             img,
-            tiff.imread(res_path),
+            res_img,
             labels=show_labels,
             frame=start_frame,
             parents=parents if show_parents else None,
             ids_to_show=ids_to_show,
             opacity=opacity,
+            trajectories=trajectory_history if show_trajectories else None,
+            trajectory_thickness=trajectory_thickness
         )
+        
         if border_width > 0:
             viz = cv2.rectangle(
                 viz,
@@ -175,6 +221,19 @@ def visualize(
         elif key == ord("p"):
             # Toggle the show parents option
             show_parents = not show_parents
+        elif key == ord("t"):
+            # Toggle the show trajectories option
+            show_trajectories = not show_trajectories
+        elif key == ord("+"):
+            # Increase trajectory length
+            max_trajectory_length += 5
+        elif key == ord("-"):
+            # Decrease trajectory length
+            max_trajectory_length = max(0, max_trajectory_length - 5)
+        elif key == ord("]"):  
+            base_trajectory_thickness = min(10, base_trajectory_thickness + 1)
+        elif key == ord("["): 
+            base_trajectory_thickness = max(1, base_trajectory_thickness - 1)
         elif key == ord("s"):
             # Save the visualization
             if viz_dir is None:
@@ -196,6 +255,8 @@ def create_colored_image(
         ids_to_show: list = None,
         frame: int = None,
         parents: dict = None,
+        trajectories: dict = None,
+        trajectory_thickness: int = 2
 ):
     """
     Creates a colored image from the input image and the results.
@@ -215,12 +276,28 @@ def create_colored_image(
             The frame number.
         parents: dict
             The parent dictionary.
-
+        trajectories: dict
+            Dictionary of trajectories for each object ID.
+        trajectory_thickness: int
+            Thickness of the trajectory lines.
     Returns:
         The colored image.
     """
     img = np.clip(img, 0, 255).astype(np.uint8)
     kernel = np.ones((3, 3), dtype=np.uint8)
+    
+    # Draw trajectories first (so they appear behind the objects)
+    if trajectories is not None:
+        for obj_id, points in trajectories.items():
+            if ids_to_show is not None and obj_id not in ids_to_show:
+                continue
+            if len(points) > 1:
+                color = get_palette_color(obj_id).tolist()
+                for i in range(1, len(points)):
+                    thickness = max(1, int(trajectory_thickness * (i / len(points))))
+                    cv2.line(img, points[i-1], points[i], color, thickness)
+    
+    # Draw objects
     for i in np.unique(res):
         if i == 0:
             continue
@@ -285,6 +362,18 @@ def parse_args():
         help='Print no parent labels to the output.'
     )
     parser.add_argument(
+        '--show-no-trajectories', action="store_false",
+        help='Do not show movement trajectories.'
+    )
+    parser.add_argument(
+        '--trajectory-length', type=int, default=10,
+        help='Number of previous frames to show in the trajectory.'
+    )
+    parser.add_argument(
+        '--trajectory-thickness', type=int, default=2,
+        help='Thickness of the trajectory lines.'
+    )
+    parser.add_argument(
         '--ids-to-show', type=int, nargs='+', default=None,
         help='The IDs of the instances to show. All others will be ignored.'
     )
@@ -308,19 +397,35 @@ def main():
     """
     Main function that is called when the script is executed.
     """
-    args = parse_args()
+    # args = parse_args()
+
+    # Test dataset
+    img = r'D:\dataset\cell-benchmark\Fluo-N2DH-SIM+\01'
+    res = r'D:\dataset\cell-benchmark\Fluo-N2DH-SIM+\01_GT\TRA'
+    viz_dir = r'D:\dataset\cell-benchmark\Fluo-N2DH-SIM+\01_VIS'
+
+    # Yokogawa dataset
+    img = r'D:\dataset\cell-data\vis_xiangyu\240129D0_F007\01'
+    res = r'D:\dataset\cell-data\vis_xiangyu\240129D0_F007\01_GT\_RES'
+    viz_dir = r'D:\dataset\cell-data\vis_xiangyu\240129D0_F007\01_VIS'
+
+    # LLS dataset
+
     visualize(
-        args.img,
-        args.res,
-        viz_dir=args.viz,
-        video_name=args.video_name,
-        border_width=args.border_width,
-        show_labels=args.show_no_labels,
-        show_parents=args.show_no_parents,
-        ids_to_show=args.ids_to_show,
-        start_frame=args.start_frame,
-        framerate=args.framerate,
-        opacity=args.opacity,
+        img,
+        res,
+        viz_dir,
+        video_name='01_video.mp4',
+        border_width=None,
+        show_labels=False,
+        show_parents=False,
+        show_trajectories=True,
+        trajectory_length=150,
+        trajectory_thickness=8,
+        ids_to_show=None,
+        start_frame=0,
+        framerate=10,
+        opacity=0.5,
     )
 
 
