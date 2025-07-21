@@ -76,6 +76,10 @@ class SitePridector:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
 
+    @classmethod
+    def init(cls, raw_stack_path: str):
+        pass
+
     # region site dection
 
     @staticmethod
@@ -513,9 +517,9 @@ class SitePridector:
 
     def get_mask_from_track(
             self,
-            opt: Literal['traj', 'patch'] = 'patch',
+            opt: Literal['traj', 'patch'] = 'traj',
         ) -> np.ndarray:
-        
+        """Convert the tracked coordinates to a mask."""
         if not self.patch_coor_reg_path.exists():
             return 
 
@@ -531,10 +535,14 @@ class SitePridector:
 
         return mask
     
-    def get_raw_stack_with_label(self, area=4):
-
+    def get_raw_stack_with_label(
+            self, 
+            area: int = 4,
+            only_traj: bool = False
+    ):
+        """Plot the raw stack with label based on the tracked coordinates."""
         if not self.patch_coor_reg_path.exists():
-            return
+            raise ValueError(f'{self.patch_coor_reg_path} is not existing!')
         
         raw_stack_with_label = self.raw_stack.copy()
         rigid_transform = get_global_transform(self.reg_transform_path, self.num_frame)
@@ -547,7 +555,9 @@ class SitePridector:
             coords = group[['y', 'x']].to_numpy().astype(float)
 
             for r, c in coords:
-
+                if only_traj and (r, c) not in traj_coords_set:
+                    continue
+                
                 label_pixel = 0 if (r, c) in traj_coords_set else 300
                 if frame != 0:
                     transform = rigid_transform[frame - 1]
@@ -566,7 +576,10 @@ class SitePridector:
         dst_path = self.root / 'raw_stack_with_label.tif'
         tiff.imwrite(dst_path, raw_stack_with_label)
     
-    def evaluate(self, opt: Literal['det', 'track', 'traj'] = 'track') -> Tuple[int, int ,int]:
+    def evaluate(
+        self, 
+        opt: Literal['det', 'track', 'traj'] = 'track'
+    ) -> Tuple[int, int ,int]:
 
         if not(self.label_path.exists()):
             raise ValueError(f'{self.label} is not existing!')
@@ -614,8 +627,3 @@ class SitePridector:
         tp = sum(tp_list); fn = sum(fn_list); fp = sum(fp_list)
 
         return tp, fn, fp
-    
-    @classmethod
-    def init(cls, raw_stack_path: str):
-        pass
-    
