@@ -15,6 +15,7 @@ from scipy.special import erf
 from scipy.signal import convolve
 from scipy.optimize import curve_fit
 from sklearn.cluster import KMeans
+from matplotlib import pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -564,7 +565,7 @@ def filter_overlapping_frames(track_data: pd.DataFrame):
     return result.sort_values(['particle', 'frame'])
 
 def link_patches(
-        data: pd.dataframe, 
+        data: pd.DataFrame, 
         search_range, 
         memory
 ):
@@ -1182,3 +1183,12 @@ def empty_compute(raw_stack, rigid_transform, total_frame):
     traj_res, bpass_stack = least_sqr_fit(traj_res, raw_stack)
 
     return traj_res, bpass_stack
+
+# region Plot
+
+def plot_intensity(df, dst_path, col='photon_number'):
+    """Plot the intensity data and save it as a PNG file."""
+    fig, ax = plt.subplots()
+    df[col].plot(kind='line', xlabel='Frame', ylabel=col, ax=ax)
+    plt.savefig(dst_path, format='png')
+    ax.cla()

@@ -28,27 +28,28 @@ TIFF files should be named in a way that indicates the cell id, such as `cellraw
 - **IMPORTANT!!**  All site tracking are done in the registration space, which is the space after the registration of the cell sequence.
 
 ```python
-import shutils
+import shutil
 from pathlib import Path
+import torch
 
-from rnaflow.site.pipeline.predictor import SitePridector
+from rnaflow.site.pipeline.predictor import SitePredictor
 
 cell_seq_path = Path('path/to/cell_sequence_folder/tiff_file')
 cell_seq_data_dir = cell_seq_path.parent / cell_seq_path.stem
 cell_seq_data_dir.mkdir(exist_ok=True)
-shutils.copy(cell_seq_path, cell_seq_data_dir, follow_symlinks=True)
+shutil.copy(cell_seq_path, cell_seq_data_dir, follow_symlinks=True)
 
 site_predictor = SitePredictor(
     cell_seq_data_dir, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 )
 
 # Run the site detection and registration
-spotlearn_model_path = 'rnaflow/site/pipeline/pt/spotlearn/epoch40.pt'
+spotlearn_model_path = 'path/to/rnaflow/site/pipeline/pt/spotlearn/epoch40.pt'
 site_predictor.site_detect(spotlearn_model_path)
 site_predictor.registration_recursive()
 # Get the coordinates of the transcription site 
-rf_classifier_path = 'rnaflow/site/pipeline/pt/rf_classifier/random_forest_model.pkl'
-nn_classifier_path = 'rnaflow/site/pipeline/pt/nn_classifier/tut1-model.pt'
+rf_classifier_path = 'path/to/rnaflow/site/pipeline/pt/rf_classifier/random_forest_model.pkl'
+nn_classifier_path = 'path/to/rnaflow/site/pipeline/pt/nn_classifier/tut1-model.pt'
 site_predictor.get_mask_coor_reg(
     rf_classifier_path=rf_classifier_path,
     nn_classifier_path=nn_classifier_path,

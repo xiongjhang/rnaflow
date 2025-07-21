@@ -20,7 +20,7 @@ def read_csv(csv_path: PathType) -> pd.DataFrame:
     return pd.read_csv(csv_path, index_col=False)
 
 
-class SitePridector:
+class SitePredictor:
     '''Predictor for a single cell sequence processing.
 
     Including site dection, cell registration, site linking and site intensity computation.
@@ -91,7 +91,7 @@ class SitePridector:
     ) -> np.ndarray:
         '''Detect sites using Spotlearn model.'''
         assert raw_stack.ndim == 3, f"Expected 3D array, got {raw_stack.ndim}D array"
-        assert raw_stack.dtype == np.float16, f"Expected float16 array, got {raw_stack.dtype} array"
+        assert raw_stack.dtype == np.uint16, f"Expected float16 array, got {raw_stack.dtype} array"
         mask_stack = np.zeros_like(raw_stack)
 
         net = SpotlearnNet(1, 1).to(device)
@@ -127,7 +127,8 @@ class SitePridector:
             return output
 
         for i in range(raw_stack.shape[0]):
-            mask_stack[i] = _pred_img(net, raw_stack[i], device, out_threshold)
+            img = raw_stack[i].copy().astype(np.float32)
+            mask_stack[i] = _pred_img(net, img, device, out_threshold)
 
         mask_stack = mask_stack * 65000
         return mask_stack
@@ -222,9 +223,9 @@ class SitePridector:
                 coor_pd.loc[i, 'y'] = prop.centroid[0]  # y in fiji viewer
                 coor_pd.loc[i, 'frame'] = frame
 
-                if prop.area <= min_region or prop.area >= max_region:
-                    # coor_pd.loc[i, 'region_filer'] = 1
-                    continue
+                # if prop.area <= min_region or prop.area >= max_region:
+                #     # coor_pd.loc[i, 'region_filer'] = 1
+                #     continue
                 coor_pd.loc[i, 'area'] = prop.area
                 
                 # gaussian filter
@@ -325,8 +326,8 @@ class SitePridector:
             memory: int = 5, 
             threshold: int = 2, 
             link_strategy: Literal['filter_patch', 'link_patch'] = 'link_patch',
-            save_smallest_id: bool = False,
-            save_longest_traj: bool = False
+            save_smallest_id: bool = True,
+            save_longest_traj: bool = True
         ):
         coor_pd = read_csv(self.det_coor_reg_path)
         new_columns = {'y [px]': 'y', 'x [px]': 'x', 'z': 'frame'}
@@ -336,9 +337,9 @@ class SitePridector:
             coor_pd, self.num_frame, search_range, memory, threshold, 
             link_strategy, save_smallest_id, save_longest_traj
         )
-
-        return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
-        traj_res.to_csv(self.traj_coor_reg_path, index=False)
+        if return_patch_res is not None and traj_res is not None:
+            return_patch_res.to_csv(self.patch_coor_reg_path, index=False)
+            traj_res.to_csv(self.traj_coor_reg_path, index=False)
 
 
     @staticmethod
@@ -381,8 +382,9 @@ class SitePridector:
             coor_pd, self.num_frame, search_range, memory
         )
 
-        patch_res.to_csv(self.patch_coor_reg_path, index=False)
-        longest_trajectory.to_csv(self.traj_coor_reg_path, index=False)
+        if patch_res is not None and longest_trajectory is not None:
+            patch_res.to_csv(self.patch_coor_reg_path, index=False)
+            longest_trajectory.to_csv(self.traj_coor_reg_path, index=False)
 
 
     def site_cluster(self, search_range=9, memory=5, threshold=2):
@@ -425,26 +427,18 @@ class SitePridector:
     # region site stastic computation
 
     @staticmethod
-    def plot_intensity(df, dst_path, col='photon_number'):
-        """Plot the intensity data and save it as a PNG file."""
-        fig, ax = plt.subplots()
-        df[col].plot(kind='line', xlabel='Frame', ylabel=col, ax=ax)
-        plt.savefig(dst_path, format='png')
-        ax.cla()
-
-    @staticmethod
     def compute_bg_intensity(
             raw_stack: np.ndarray,
             rigid_transform: list,
             num_frame: int,
             res_dst_path: Path,
-            plot_intensity: bool = True,
+            is_plot_intensity: bool = True,
     ):
         """Compute the background intensity of fake tracked sites."""
         traj_res, _ = empty_compute(raw_stack, rigid_transform, num_frame)
         traj_res.to_csv(res_dst_path, index=False)
 
-        if plot_intensity:
+        if is_plot_intensity:
             plot_intensity(traj_res, res_dst_path.with_suffix('.png'))
     
     @staticmethod
@@ -455,7 +449,7 @@ class SitePridector:
         track_res: pd.DataFrame, 
         res_dst_dir: Path,
         random_sample_when_zero: bool = True,
-        plot_intensity: bool = True,
+        is_plot_intensity: bool = True,
     ):
         """Compute the intensity of the tracked sites."""
         assert not track_res['particle'].empty, "The track_res DataFrame is empty."
@@ -471,13 +465,12 @@ class SitePridector:
 
             traj_res, _ = traj_compute(traj_tp_data, raw_stack, rigid_transform, num_frame, random_sample_when_zero)
             res_dst_path = res_dst_dir / ('dataAnalysis_tj_' + str(traj_id) + '_withBg.csv')
-            traj_res.to_csv(dst_path, index=False)
+            traj_res.to_csv(res_dst_path, index=False)
 
-            if plot_intensity:
-                dst_path = dst_path.with_suffix('.png')
+            if is_plot_intensity:
                 plot_intensity(traj_res, res_dst_path.with_suffix('.png'))
 
-    def compute_intensity(self, site2=False, plot_intensity=True, random_sample_when_zero=True):
+    def compute_intensity(self, site2=False, is_plot_intensity=True, random_sample_when_zero=True):
         """Pipelien method to compute the intensity of the tracked sites."""
         raw_stack = tiff.imread(self.det_raw_path)[0]
         rigid_transform = get_global_transform(self.reg_transform_path, self.num_frame)
@@ -492,23 +485,23 @@ class SitePridector:
             if not site2:
                 self.compute_bg_intensity(
                     raw_stack, rigid_transform, self.num_frame, 
-                    self.root / 'dataAnalysis_tj_empty_withBg.csv', plot_intensity=plot_intensity
+                    self.root / 'dataAnalysis_tj_empty_withBg.csv', is_plot_intensity=is_plot_intensity
                 )
             else:
                 self.compute_bg_intensity(
                     raw_stack, rigid_transform, self.num_frame, 
-                    self.root / 'dataAnalysis_tj_empty_0_withBg.csv', plot_intensity=plot_intensity
+                    self.root / 'dataAnalysis_tj_empty_0_withBg.csv', is_plot_intensity=is_plot_intensity
                 )
                 self.compute_bg_intensity(
                     raw_stack, rigid_transform, self.num_frame, 
-                    self.root / 'dataAnalysis_tj_empty_1_withBg.csv', plot_intensity=plot_intensity
+                    self.root / 'dataAnalysis_tj_empty_1_withBg.csv', is_plot_intensity=is_plot_intensity
                 )
         else:
             self.compute_tracked_intensity(
                 raw_stack, rigid_transform, self.num_frame,
                 track_res, self.root,
                 random_sample_when_zero=random_sample_when_zero,
-                plot_intensity=plot_intensity
+                is_plot_intensity=is_plot_intensity
             )
 
     # ====================
