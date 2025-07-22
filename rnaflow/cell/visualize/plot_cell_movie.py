@@ -1,6 +1,7 @@
 '''https://github.com/CellTrackingChallenge/py-ctcmetrics/blob/main/ctc_metrics/scripts/visualize.py'''
 
 import argparse
+from typing import Literal, Optional
 from os import listdir, makedirs
 from os.path import join
 import tifffile as tiff
@@ -39,6 +40,7 @@ def visualize(
         res_dir: str,
         viz_dir: str = None,
         video_name: str = None,
+        video_format: Literal['mp4', 'avi'] = 'mp4',
         border_width: str = None,
         show_labels: bool = True,
         show_parents: bool = True,
@@ -61,8 +63,10 @@ def visualize(
         viz_dir: str
             The path to save the visualizations.
         video_name: str
-            The path to the video if a video should be created. Note that no
-            visualization is available during video creation.
+            The base name of the video file to save. If None, no video will be created.
+            Note that no visualization is available during video creation.
+        video_format: Literal['mp4', 'avi']
+            The format of the video to save. Default is 'mp4'.
         border_width: str or int
             The width of the border. Either an integer or a string that
             describes the challenge name.
@@ -127,11 +131,13 @@ def visualize(
         print(f"\rFrame {img_name} (of {len(images)})", end="")
 
         # Visualize the image
-        img = tiff.imread(img_path)
+        img = tiff.imread(img_path).squeeze()
+        assert img.ndim == 2, "Image must be 2D (single channel)"
         p1, p99 = np.percentile(img, (1, 99))
         img = np.clip((img - p1) / max(p99 - p1, 1e-5) * 255, 0, 255).astype(np.uint8)
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         res_img = tiff.imread(res_path).squeeze()
+        assert res_img.ndim == 2, "Result image must be 2D (single channel)"
         
         # Update trajectory history
         if show_trajectories:
@@ -183,11 +189,20 @@ def visualize(
         # Save the visualization
         if video_name is not None:
             if video_writer is None:
-                video_path = join(
-                    viz_dir, f"{video_name.replace('.mp4', '')}.mp4")
+                video_basename = video_name.split('.')[0]  # remove available extension
+                video_path = join(viz_dir, f"{video_basename}.{video_format}")
+
+                # choose fourcc encoding based on video format
+                if video_format == 'mp4':
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # H.264 encoding
+                elif video_format == 'avi':
+                    fourcc = cv2.VideoWriter_fourcc(*"XVID")  # AVI encoding
+                else:
+                    raise ValueError(f"Unsupported video format: {video_format}")
+
                 video_writer = cv2.VideoWriter(
                     video_path,
-                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    fourcc,
                     framerate,
                     (viz.shape[1], viz.shape[0])
                 )
@@ -349,6 +364,10 @@ def parse_args():
              'visualization is available during video creation.'
     )
     parser.add_argument(
+        '--video-format', type=str, default="mp4", choices=["mp4", "avi"],
+        help='Video format to save (mp4 or avi). Default: mp4.'
+    )
+    parser.add_argument(
         '--border-width', type=str, default=None,
         help='The width of the border. Either an integer or a string that '
              'describes the challenge name.'
@@ -410,12 +429,16 @@ def main():
     viz_dir = r'D:\dataset\cell-data\vis_xiangyu\240129D0_F007\01_VIS'
 
     # LLS dataset
+    img = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01'
+    res = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01_GT/_RES'
+    viz_dir = '/mnt/sda/xjh/dataset/cell-data/20250722-xiangyu_vis/01_VIS'
 
     visualize(
         img,
         res,
         viz_dir,
-        video_name='01_video.mp4',
+        video_name='01_video_20f',
+        video_format='mp4',
         border_width=None,
         show_labels=False,
         show_parents=False,
