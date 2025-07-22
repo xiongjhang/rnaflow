@@ -73,6 +73,8 @@ def visualize(
         trajectory_length: int = 10,
         trajectory_thickness: int = 2,
         framerate: int = 30,
+        using_tp: bool = False,
+        resize_factor: int = 1,
 ):
     """
     Visualize the cell trajectory on the cell sequence.
@@ -98,14 +100,23 @@ def visualize(
             The thickness of the trajectory lines.
         framerate : int, default 30
             The framerate of the video if created.
+        using_tp : bool, default False
+            Whether to use the 'TP_Flag' column in the trajectory data to filter points.
+        resize_factor : int, default 1
+            Factor by which to resize the images for visualization.
     """
     # Check input validity
     assert img.shape == img_reg.shape, \
         f"Original and registered images must have the same shape, but got {img.shape} and {img_reg.shape}."
     assert img.ndim == 3, f"Input images must be 3-dimensional, but got {img.ndim} dimensions."
     assert len(traj_data) > 0, "Trajectory data must not be empty."
+
     # Combined example
-    combined_frame = np.hstack((img[0], img_reg[0]))
+    img_0 = cv2.resize(img[0], (img[0].shape[1] * resize_factor, img[0].shape[0] * resize_factor),
+                       interpolation=cv2.INTER_LINEAR)
+    img_reg_0 = cv2.resize(img_reg[0], (img_reg[0].shape[1] * resize_factor, img_reg[0].shape[0] * resize_factor),
+                           interpolation=cv2.INTER_LINEAR)
+    combined_frame = np.hstack((img_0, img_reg_0))
 
     # Create visualization directory
     if viz_dir:
@@ -149,22 +160,31 @@ def visualize(
             frame_reg = normalize_frame(img_reg[t])
             frame_org = cv2.cvtColor(frame_org, cv2.COLOR_GRAY2BGR)
             frame_reg = cv2.cvtColor(frame_reg, cv2.COLOR_GRAY2BGR)
+            frame_org = cv2.resize(frame_org, (frame_org.shape[1] * resize_factor, frame_org.shape[0] * resize_factor),
+                                  interpolation=cv2.INTER_LINEAR)
+            frame_reg = cv2.resize(frame_reg, (frame_reg.shape[1] * resize_factor, frame_reg.shape[0] * resize_factor),
+                                    interpolation=cv2.INTER_LINEAR)
                 
             # Get trajectory up to current frame
-            df_frame = df[df.index <= t].tail(max_trajectory_length)
+            if using_tp:
+                df_frame = df[(df.index <= t) & (df['TP_Flag'] == 1)].tail(max_trajectory_length)
+            else:
+                df_frame = df[df.index <= t].tail(max_trajectory_length)
             
             if len(df_frame) > 0:
-                org_traj = df_frame[['Org_X', 'Org_Y']].values.astype(int)
-                reg_traj = df_frame[['Reg_X', 'Reg_Y']].values.astype(int)
+                org_traj = (df_frame[['Org_X', 'Org_Y']].values * resize_factor).astype(int)
+                reg_traj = (df_frame[['Reg_X', 'Reg_Y']].values * resize_factor).astype(int)
 
             viz_org = create_colored_image(
                 frame_org, org_traj, site_id,
-                frame=t, trajectory_thickness=base_trajectory_thickness
+                # frame=t, 
+                trajectory_thickness=base_trajectory_thickness
             )
             
             viz_reg = create_colored_image(
                 frame_reg, reg_traj, site_id,
-                frame=t, trajectory_thickness=base_trajectory_thickness
+                # frame=t, 
+                trajectory_thickness=base_trajectory_thickness
             )
 
             # Combine the visualized frames
@@ -192,8 +212,9 @@ def main():
         viz_dir=data_dir,
         video_name='site_trajectory_visualization',
         trajectory_length=1000,
-        trajectory_thickness=3,
-        framerate=10
+        trajectory_thickness=2,
+        framerate=10,
+        using_tp=True,
     )
 
 if __name__ == "__main__":
