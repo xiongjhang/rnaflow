@@ -8,6 +8,8 @@ Please make sure you have the required dependencies installed. You can install t
 pip install trackpy tifffile SimpleITK
 ```
 
+`torch` is also required, please refer to the [PyTorch installation guide](https://pytorch.org/get-started/locally/) for your specific environment.
+
 ## Data Format
 
 This pipeline expects the input data to be in the following format:

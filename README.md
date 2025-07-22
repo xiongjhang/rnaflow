@@ -33,16 +33,19 @@ Code for RNA Transcription Kinetics Analysis, including cell segmentaiton, cell 
       
 ## Installation
 
+### env `rnaflow`
+
 ```bash
 conda create --name rnaflow python=3.10
 conda activate rnaflow
 # for cellpose-sam
-python -m pip install cellpose
-python -m pip install notebook
-python -m pip install matplotlib
+python -m pip install cellpose notebook matplotlib
 # for trackastra
 conda install -c conda-forge -c gurobi -c funkelab ilpy
 pip install "trackastra[ilp]"
+# ultralytics
+pip install ultralytics
+
 # for micro-sam
 conda install -c conda-forge micro_sam
 
@@ -59,28 +62,37 @@ pip install -e .
     
     **Solution:**  `conda install -c conda-forge scip`
 
-2. After install `micro-sam`, `import cv2` raise following error
-
-    `ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version 'GLIBCXX_3.4.26' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow/lib/python3.10/site-packages/cv2/python-3.10/cv2.cpython-310-x86_64-linux-gnu.so)`
-
-    **Solution:**  https://blog.csdn.net/YoJayC/article/details/120175550
-
-3. `AssertionError: Torch not compiled with CUDA enabled`: `torch.cuda.is_available()` is `False`
-
-**Tips**: `2.` and `3.` may be caused by `conda install -c conda-forge micro_sam`, there may be some conflicts.
-
-Error Message:
+### env `micro-sam`
+Please refer to the [micro-sam](https://computational-cell-analytics.github.io/micro-sam/micro_sam.html#installation) for installation instructions.
 
 ```bash
-/ By downloading and using the cuDNN conda packages, you accept the terms and conditions of the NVIDIA cuDNN EULA -
-  https://docs.nvidia.com/deeplearning/cudnn/sla/index.html
+conda create -c conda-forge -n micro-sam micro_sam
+conda activate micro-sam
+conda install -c conda-forge micro_sam "libtorch=*=cuda11*"  # base on your cuda version
 
-| g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libicuuc.so.75)
-g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libLerc.so.4)
+git clone https://github.com/xiongjhang/rnaflow.git
+cd rnaflow
+pip install -e .
+```
 
-\ 
-- g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libicuuc.so.75)
-g_module_open() failed for /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by /home/xiongjiahang/anaconda3/envs/rnaflow-test/lib/gdk-pixbuf-2.0/2.10.0/loaders/../../.././libLerc.so.4)
+### env `cell-tracker-gnn`
+
+Please refer to the [cell-tracker-gnn](https://github.com/talbenha/cell-tracker-gnn#set-up-conda-virtual-environment) for installation instructions.
+
+```bash
+# Enter to the code folder
+cd cell-tracker-gnn
+
+# create conda environment python=3.8 pytorch==1.8.0 torchvision==0.9.0 cudatoolkit=11.1 faiss-gpu pytorch-lightning==1.4.9
+conda create --name cell-tracker-gnn --file requirements-conda.txt
+conda activate cell-tracker-gnn
+
+# install other requirements
+pip install -r requirements.txt
+
+git clone https://github.com/xiongjhang/rnaflow.git
+cd rnaflow
+pip install -e .
 ```
 
 ## Usage/Examples
