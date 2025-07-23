@@ -97,8 +97,7 @@ pip install -e .
 
 ## Usage/Examples
 
-TODO
-
+For more details about each part, please refer to the [Project README](./rnaflow/README.md).
 
 ## License
 
