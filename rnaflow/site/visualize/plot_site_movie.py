@@ -27,6 +27,7 @@ def create_colored_image(
         trajectories: np.ndarray,
         site_id: int,
         frame: int = None,
+        plot_frame: bool = False,
         alpha: float = 1,
         draw_mode: str = None,
         trajectory_thickness: int = 2,
@@ -40,12 +41,14 @@ def create_colored_image(
         img: np.ndarray
             The input image.
         trajectories: np.ndarray
-            2D array of shape (N, 2) where N is the length of the trajectory.
-            Each row contains the (x, y) coordinates of a trajectory point.
+            3D array of shape (N, 3) where N is the length of the trajectory.
+            Each row contains the (x, y, t) coordinates of a trajectory point.
         site_id: int
             The site ID for which the trajectory is being visualized.
         frame: int
             The frame number.
+        plot_frame: bool
+            Whether to plot the frame number on the image.
         alpha: float
             Transparency factor for the overlay.
         draw_mode: str
@@ -75,16 +78,17 @@ def create_colored_image(
                 thickness = max(1, int(trajectory_thickness * (i / len(trajectories))))
                 cv2.line(traj_layer, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
 
-        elif draw_mode == 'box':  
+        elif draw_mode == 'box':
             latest_pt = tuple(np.round(trajectories[-1]).astype(int))
-            top_left = (latest_pt[0] - box_size // 2, latest_pt[1] - box_size // 2)
-            bottom_right = (latest_pt[0] + box_size // 2, latest_pt[1] + box_size // 2)
-            cv2.rectangle(traj_layer, top_left, bottom_right, color, thickness=box_thickness)
+            if latest_pt[-1] == frame:
+                top_left = (latest_pt[0] - box_size // 2, latest_pt[1] - box_size // 2)
+                bottom_right = (latest_pt[0] + box_size // 2, latest_pt[1] + box_size // 2)
+                cv2.rectangle(traj_layer, top_left, bottom_right, color, thickness=box_thickness)
     
     blended = cv2.addWeighted(img, 1.0, traj_layer, alpha, 0)
 
     # Add frame number if specified
-    if frame is not None:
+    if plot_frame is not None:
         cv2.putText(img, str(frame), (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     
@@ -136,6 +140,7 @@ def visualize(
             The framerate of the video if created.
         using_tp : bool, default False
             Whether to use the 'TP_Flag' column in the trajectory data to filter points.
+            Only affective if `draw_mode` is 'box'.
         resize_factor : int, default 1
             Factor by which to resize the images for visualization.
     """
@@ -206,19 +211,21 @@ def visualize(
                 df_frame = df[df.index <= t].tail(max_trajectory_length)
             
             if len(df_frame) > 0:
-                org_traj = (df_frame[['Org_X', 'Org_Y']].values * resize_factor).astype(int)
-                reg_traj = (df_frame[['Reg_X', 'Reg_Y']].values * resize_factor).astype(int)
+                org_traj = (df_frame[['Org_X', 'Org_Y','POSITION_T']].values * resize_factor).astype(int)
+                reg_traj = (df_frame[['Reg_X', 'Reg_Y','POSITION_T']].values * resize_factor).astype(int)
 
             viz_org = create_colored_image(
                 frame_org, org_traj, site_id,
-                # frame=t, 
+                frame=t, 
+                plot_frame=False,
                 alpha=alpha, draw_mode=draw_mode,
                 trajectory_thickness=base_trajectory_thickness
             )
             
             viz_reg = create_colored_image(
                 frame_reg, reg_traj, site_id,
-                # frame=t, 
+                frame=t, 
+                plot_frame=False,
                 alpha=alpha, draw_mode=draw_mode,
                 trajectory_thickness=base_trajectory_thickness
             )
