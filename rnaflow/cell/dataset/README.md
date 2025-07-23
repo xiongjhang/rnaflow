@@ -23,6 +23,8 @@ The progress of our cell tracking dataset labeling are described as follows:
 
     - correct the cell mask shape
 
+    More specifically, when using micro-sam annotation tool in napari, we use the existing cell mask as a indiviual label layer instead of an initialization of `committed_objects` label layer. This is because there are lots of cell masks in the auto segmentation results, if use the existing cell mask as an initialization of `committed_objects` label layer, it will be very slow to perform the commit operation, and more baddly, it may lead to a sharp increase of the memory usage. Therefore, we use the existing cell mask as a indiviual label layer, and then use the defined *merge* function to merge the committed objects with the existing cell mask after the commit operation.
+
 3. **Cell Tracking:** we use [trackastra](trackastra) to perform cell tracking on the corrected cell masks. This step is to 
 
     - using `greedy_nodiv` track mode to link the consecutive masks of individual cells across time frames, i.e., all cell's parent is `0`.
