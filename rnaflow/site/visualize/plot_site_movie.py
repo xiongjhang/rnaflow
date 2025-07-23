@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Literal
 from os import makedirs
 from os.path import join
 from collections import defaultdict
@@ -27,7 +27,11 @@ def create_colored_image(
         trajectories: np.ndarray,
         site_id: int,
         frame: int = None,
+        alpha: float = 1,
+        draw_mode: str = None,
         trajectory_thickness: int = 2,
+        box_size: int = 8,
+        box_thickness: int = 1,
 ):
     """
     Creates an image with trajectories drawn on top of the input image.
@@ -42,8 +46,16 @@ def create_colored_image(
             The site ID for which the trajectory is being visualized.
         frame: int
             The frame number.
+        alpha: float
+            Transparency factor for the overlay.
+        draw_mode: str
+            Drawing mode: 'line' to draw trajectory lines, 'box' to draw boxes at each point.
         trajectory_thickness: int
             Thickness of the trajectory lines.
+        box_size: int
+            Size of the boxes to draw around trajectory points.
+        box_thickness: int
+            Thickness of the box edges.
 
     Returns:
         The colored image.
@@ -51,18 +63,32 @@ def create_colored_image(
     img = np.clip(img, 0, 255).astype(np.uint8)
     color = get_palette_color(site_id).tolist()
 
-    # Draw trajectories
-    if trajectories is not None and len(trajectories) > 1:
-        for i in range(1, len(trajectories)): 
-            thickness = max(1, int(trajectory_thickness * (i / len(trajectories))))
-            cv2.line(img, trajectories[i-1], trajectories[i], color, thickness)
+    h, w = img.shape[:2]
+    traj_layer = np.zeros((h, w, 3), dtype=np.uint8)
+
+    if trajectories is not None and len(trajectories) > 0:
+        # Draw trajectories
+        if draw_mode == 'line' and len(trajectories) > 1:
+            for i in range(1, len(trajectories)):
+                pt1 = tuple(np.round(trajectories[i - 1]).astype(int))
+                pt2 = tuple(np.round(trajectories[i]).astype(int))
+                thickness = max(1, int(trajectory_thickness * (i / len(trajectories))))
+                cv2.line(traj_layer, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
+
+        elif draw_mode == 'box':  
+            latest_pt = tuple(np.round(trajectories[-1]).astype(int))
+            top_left = (latest_pt[0] - box_size // 2, latest_pt[1] - box_size // 2)
+            bottom_right = (latest_pt[0] + box_size // 2, latest_pt[1] + box_size // 2)
+            cv2.rectangle(traj_layer, top_left, bottom_right, color, thickness=box_thickness)
+    
+    blended = cv2.addWeighted(img, 1.0, traj_layer, alpha, 0)
 
     # Add frame number if specified
     if frame is not None:
         cv2.putText(img, str(frame), (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     
-    return img
+    return blended
 
 def visualize(
         img: np.ndarray,
@@ -70,6 +96,8 @@ def visualize(
         traj_data: dict[int, pd.DataFrame],
         viz_dir: str = None,
         video_name: str = None,
+        alpha: float = 1,
+        draw_mode: Literal['line', 'box'] = 'line',
         trajectory_length: int = 10,
         trajectory_thickness: int = 2,
         framerate: int = 30,
@@ -92,6 +120,12 @@ def visualize(
             - 'TP_Flag': A flag indicating whether the trajectory point is a visualization site.
         viz_dir : str, optional
             The directory to save the visualization. If None, no visualization is saved.
+        alpha : float, default 1
+            Transparency factor for the overlay.
+        draw_mode : Literal['line', 'box'], default 'line'
+            The drawing mode for the trajectory:
+            - 'line': Draw lines connecting trajectory points.
+            - 'box': Draw boxes around trajectory points.
         video_name : str, optional
             The name of the video file to save. If None, no video will be created.
         trajectory_length : int, default 10
@@ -135,7 +169,7 @@ def visualize(
         # Initialize video writer for this site
         video_format = 'mp4'
         if video_name:
-            site_video_path = join(viz_dir, f"{video_name}_{site_id}.{video_format}")
+            site_video_path = join(viz_dir, f"{video_name}_{site_id}_{draw_mode}.{video_format}")
             fourcc = {
                 'mp4': cv2.VideoWriter_fourcc(*'mp4v'),
                 'avi': cv2.VideoWriter_fourcc(*'XVID')
@@ -155,7 +189,7 @@ def visualize(
 
         # Process each frame
         for t in range(len(img)):
-            # Visualize the image
+            # Visualize the image   
             frame_org = normalize_frame(img[t])
             frame_reg = normalize_frame(img_reg[t])
             frame_org = cv2.cvtColor(frame_org, cv2.COLOR_GRAY2BGR)
@@ -178,12 +212,14 @@ def visualize(
             viz_org = create_colored_image(
                 frame_org, org_traj, site_id,
                 # frame=t, 
+                alpha=alpha, draw_mode=draw_mode,
                 trajectory_thickness=base_trajectory_thickness
             )
             
             viz_reg = create_colored_image(
                 frame_reg, reg_traj, site_id,
                 # frame=t, 
+                alpha=alpha, draw_mode=draw_mode,
                 trajectory_thickness=base_trajectory_thickness
             )
 
@@ -194,6 +230,8 @@ def visualize(
             if video_writer:
                 video_writer.write(combined_frame)
 
+
+# ====== Other functions for visualization ======
 
 
 def main():
@@ -211,6 +249,7 @@ def main():
         traj_data,
         viz_dir=data_dir,
         video_name='site_trajectory_visualization',
+        draw_mode='box',
         trajectory_length=1000,
         trajectory_thickness=2,
         framerate=10,
