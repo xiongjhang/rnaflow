@@ -52,7 +52,8 @@ def create_colored_image(
         alpha: float
             Transparency factor for the overlay.
         draw_mode: str
-            Drawing mode: 'line' to draw trajectory lines, 'box' to draw boxes at each point.
+            Drawing mode: 'line' to draw trajectory lines, 'box' to draw boxes at each point, 
+                        'line&box' to draw both lines and boxes.    
         trajectory_thickness: int
             Thickness of the trajectory lines.
         box_size: int
@@ -71,14 +72,14 @@ def create_colored_image(
 
     if trajectories is not None and len(trajectories) > 0:
         # Draw trajectories
-        if draw_mode == 'line' and len(trajectories) > 1:
+        if draw_mode in ['line', 'line&box'] and len(trajectories) > 1:
             for i in range(1, len(trajectories)):
-                pt1 = tuple(np.round(trajectories[i - 1]).astype(int))
-                pt2 = tuple(np.round(trajectories[i]).astype(int))
+                pt1 = tuple(np.round(trajectories[i - 1][:2]).astype(int))
+                pt2 = tuple(np.round(trajectories[i][:2]).astype(int))
                 thickness = max(1, int(trajectory_thickness * (i / len(trajectories))))
                 cv2.line(traj_layer, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
 
-        elif draw_mode == 'box':
+        if draw_mode in ['box', 'line&box']:
             latest_pt = tuple(np.round(trajectories[-1]).astype(int))
             if latest_pt[-1] == frame:
                 top_left = (latest_pt[0] - box_size // 2, latest_pt[1] - box_size // 2)
@@ -101,7 +102,7 @@ def visualize(
         viz_dir: str = None,
         video_name: str = None,
         alpha: float = 1,
-        draw_mode: Literal['line', 'box'] = 'line',
+        draw_mode: Literal['line', 'box', 'line&box'] = 'line',
         trajectory_length: int = 10,
         trajectory_thickness: int = 2,
         framerate: int = 30,
@@ -126,10 +127,11 @@ def visualize(
             The directory to save the visualization. If None, no visualization is saved.
         alpha : float, default 1
             Transparency factor for the overlay.
-        draw_mode : Literal['line', 'box'], default 'line'
+        draw_mode : Literal['line', 'box',  'line&box'], default 'line'
             The drawing mode for the trajectory:
             - 'line': Draw lines connecting trajectory points.
             - 'box': Draw boxes around trajectory points.
+            - 'line&box': Draw both lines and boxes.
         video_name : str, optional
             The name of the video file to save. If None, no video will be created.
         trajectory_length : int, default 10
@@ -256,7 +258,7 @@ def main():
         traj_data,
         viz_dir=data_dir,
         video_name='site_trajectory_visualization',
-        draw_mode='box',
+        draw_mode='line&box',
         trajectory_length=1000,
         trajectory_thickness=2,
         framerate=10,
