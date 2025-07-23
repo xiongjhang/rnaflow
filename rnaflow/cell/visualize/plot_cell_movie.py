@@ -34,6 +34,98 @@ def get_palette_color(i):
     i = i % PALETTE.shape[0]
     return PALETTE[i]
 
+def load_frame_data(img_path, res_path):
+    img = tiff.imread(img_path).squeeze()
+    assert img.ndim == 2, "Image must be 2D (single channel)"
+    p1, p99 = np.percentile(img, (1, 99))
+    img = np.clip((img - p1) / max(p99 - p1, 1e-5) * 255, 0, 255).astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    
+    res_img = tiff.imread(res_path).squeeze()
+    assert res_img.ndim == 2 and img.shape == res_img.shape, \
+        "Result image must be 2D (single channel) and match the image shape"
+    return img, res_img
+
+def create_colored_image(
+        img: np.ndarray,
+        res: np.ndarray,
+        labels: bool = False,
+        opacity: float = 0.5,
+        ids_to_show: list = None,
+        frame: int = None,
+        parents: dict = None,
+        trajectories: dict = None,
+        trajectory_thickness: int = 2
+):
+    """
+    Creates a colored image from the input image and the results.
+
+    Args:
+        img: np.ndarray
+            The input image.
+        res: np.ndarray
+            The results.
+        labels: bool
+            Print instance labels to the output.
+        opacity: float
+            The opacity of the instance colors.
+        ids_to_show: list
+            The IDs of the instances to show. All others will be ignored.
+        frame: int
+            The frame number.
+        parents: dict
+            The parent dictionary.
+        trajectories: dict
+            Dictionary of trajectories for each object ID.
+        trajectory_thickness: int
+            Thickness of the trajectory lines.
+    Returns:
+        The colored image.
+    """
+    img = np.clip(img, 0, 255).astype(np.uint8)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    
+    # Draw trajectories first (so they appear behind the objects)
+    if trajectories is not None:
+        for obj_id, points in trajectories.items():
+            if ids_to_show is not None and obj_id not in ids_to_show:
+                continue
+            if len(points) > 1:
+                color = get_palette_color(obj_id).tolist()
+                for i in range(1, len(points)):
+                    thickness = max(1, int(trajectory_thickness * (i / len(points))))
+                    cv2.line(img, points[i-1], points[i], color, thickness)
+    
+    # Draw objects
+    for i in np.unique(res):
+        if i == 0:
+            continue
+        if ids_to_show is not None:
+            if i not in ids_to_show:
+                continue
+        mask = res == i
+        contour = (mask * 255).astype(np.uint8) - \
+                  cv2.erode((mask * 255).astype(np.uint8), kernel)
+        contour = contour != 0
+        img[mask] = (
+            np.round((1 - opacity) * img[mask] + opacity * get_palette_color(i))
+        )
+        img[contour] = get_palette_color(i)
+        if frame is not None:
+            cv2.putText(img, str(frame), (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        if labels:
+            # Print label to the center of the object
+            y, x = np.where(mask)
+            y, x = np.mean(y), np.mean(x)
+            text = str(i)
+            if parents is not None:
+                if i in parents:
+                    if parents[i] != 0:
+                        text += f"({parents[i]})"
+            cv2.putText(img, text, (int(x), int(y)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    return img
 
 def visualize(
         img_dir: str,
@@ -131,13 +223,7 @@ def visualize(
         print(f"\rFrame {img_name} (of {len(images)})", end="")
 
         # Visualize the image
-        img = tiff.imread(img_path).squeeze()
-        assert img.ndim == 2, "Image must be 2D (single channel)"
-        p1, p99 = np.percentile(img, (1, 99))
-        img = np.clip((img - p1) / max(p99 - p1, 1e-5) * 255, 0, 255).astype(np.uint8)
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        res_img = tiff.imread(res_path).squeeze()
-        assert res_img.ndim == 2, "Result image must be 2D (single channel)"
+        img, res_img = load_frame_data(img_path, res_path)
         
         # Update trajectory history
         if show_trajectories:
@@ -261,87 +347,173 @@ def visualize(
             # Move to the next frame
             start_frame += 1
 
-
-def create_colored_image(
-        img: np.ndarray,
-        res: np.ndarray,
-        labels: bool = False,
-        opacity: float = 0.5,
+def visualize_parallel(
+        img_dir: str,
+        res_dir: str,
+        viz_dir: str = None,
+        video_name: str = None,
+        video_format: Literal['mp4', 'avi'] = 'mp4',
+        border_width: str = None,
+        show_labels: bool = True,
+        show_parents: bool = True,
+        show_trajectories: bool = True,
+        trajectory_length: int = 10,
+        trajectory_thickness: int = 2,
         ids_to_show: list = None,
-        frame: int = None,
-        parents: dict = None,
-        trajectories: dict = None,
-        trajectory_thickness: int = 2
-):
+        start_frame: int = 0,
+        framerate: int = 30,
+        opacity: float = 0.5,
+):  # pylint: disable=too-many-arguments,too-complex,too-many-locals
     """
-    Creates a colored image from the input image and the results.
+    Visualizes the tracking results.
 
     Args:
-        img: np.ndarray
-            The input image.
-        res: np.ndarray
-            The results.
-        labels: bool
+        img_dir: str
+            The path to the images.
+        res_dir: str
+            The path to the results.
+        viz_dir: str
+            The path to save the visualizations.
+        video_name: str
+            The base name of the video file to save. If None, no video will be created.
+            Note that no visualization is available during video creation.
+        video_format: Literal['mp4', 'avi']
+            The format of the video to save. Default is 'mp4'.
+        border_width: str or int
+            The width of the border. Either an integer or a string that
+            describes the challenge name.
+        show_labels: bool
             Print instance labels to the output.
-        opacity: float
-            The opacity of the instance colors.
-        ids_to_show: list
-            The IDs of the instances to show. All others will be ignored.
-        frame: int
-            The frame number.
-        parents: dict
-            The parent dictionary.
-        trajectories: dict
-            Dictionary of trajectories for each object ID.
+        show_parents: bool
+            Print parent labels to the output.
+        show_trajectories: bool
+            Show movement trajectories of the instances.
+        trajectory_length: int
+            Number of previous frames to show in the trajectory.
         trajectory_thickness: int
             Thickness of the trajectory lines.
-    Returns:
-        The colored image.
+        ids_to_show: list
+            The IDs of the instances to show. All others will be ignored.
+        start_frame: int
+            The frame to start the visualization.
+        framerate: int
+            The framerate of the video.
+        opacity: float
+            The opacity of the instance colors.
+
     """
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    kernel = np.ones((3, 3), dtype=np.uint8)
+    # Define initial video parameters
+    wait_time = max(1, round(1000 / framerate))
+    if border_width is None:
+        border_width = 0
+    elif isinstance(border_width, str):
+        try:
+            border_width = int(border_width)
+        except ValueError as exc:
+            if border_width in BORDER_WIDTH:
+                border_width = BORDER_WIDTH[border_width]
+            else:
+                raise ValueError(
+                    f"Border width '{border_width}' not recognized. "
+                    f"Existing datasets: {BORDER_WIDTH.keys()}"
+                ) from exc
+
+    # Load image and tracking data
+    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")]
+    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")]
+    tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
+    parents = {l[0]: l[3] for l in tracking_data}
+
+    # Create visualization directory
+    if viz_dir:
+        makedirs(viz_dir, exist_ok=True)
+
+    video_writer = None
     
-    # Draw trajectories first (so they appear behind the objects)
-    if trajectories is not None:
-        for obj_id, points in trajectories.items():
-            if ids_to_show is not None and obj_id not in ids_to_show:
-                continue
-            if len(points) > 1:
-                color = get_palette_color(obj_id).tolist()
-                for i in range(1, len(points)):
-                    thickness = max(1, int(trajectory_thickness * (i / len(points))))
-                    cv2.line(img, points[i-1], points[i], color, thickness)
-    
-    # Draw objects
-    for i in np.unique(res):
-        if i == 0:
-            continue
-        if ids_to_show is not None:
-            if i not in ids_to_show:
-                continue
-        mask = res == i
-        contour = (mask * 255).astype(np.uint8) - \
-                  cv2.erode((mask * 255).astype(np.uint8), kernel)
-        contour = contour != 0
-        img[mask] = (
-            np.round((1 - opacity) * img[mask] + opacity * get_palette_color(i))
+    # Initialize trajectory tracking
+    trajectory_history = defaultdict(list)
+    max_trajectory_length = trajectory_length
+    base_trajectory_thickness = trajectory_thickness
+
+    # Loop through all images
+    while start_frame < len(images):
+        # Read image file
+        img_name, res_name = images[start_frame], results[start_frame]
+        img_path, res_path,  = join(img_dir, img_name), join(res_dir, res_name)
+        print(f"\rFrame {img_name} (of {len(images)})", end="")
+
+        # Visualize the image
+        img, res_img = load_frame_data(img_path, res_path)
+        
+        # Update trajectory history
+        if show_trajectories:
+            current_centers = {}
+            for i in np.unique(res_img):
+                if i == 0:
+                    continue
+                mask = res_img == i
+                y, x = np.where(mask)
+                center = (int(np.mean(x)), int(np.mean(y)))
+                current_centers[i] = center
+                
+            # Update history for existing trajectories
+            for obj_id in list(trajectory_history.keys()):
+                if obj_id in current_centers:
+                    trajectory_history[obj_id].append(current_centers[obj_id])
+                    # Trim to max length
+                    if len(trajectory_history[obj_id]) > max_trajectory_length:
+                        trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
+                else:
+                    # Remove trajectories for objects that disappeared
+                    del trajectory_history[obj_id]
+            
+            # Add new objects
+            for obj_id in current_centers:
+                if obj_id not in trajectory_history:
+                    trajectory_history[obj_id] = [current_centers[obj_id]]
+
+        viz = create_colored_image(
+            img,
+            res_img,
+            labels=show_labels,
+            frame=start_frame,
+            parents=parents if show_parents else None,
+            ids_to_show=ids_to_show,
+            opacity=opacity,
+            trajectories=trajectory_history if show_trajectories else None,
+            trajectory_thickness=trajectory_thickness
         )
-        img[contour] = get_palette_color(i)
-        if frame is not None:
-            cv2.putText(img, str(frame), (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        if labels:
-            # Print label to the center of the object
-            y, x = np.where(mask)
-            y, x = np.mean(y), np.mean(x)
-            text = str(i)
-            if parents is not None:
-                if i in parents:
-                    if parents[i] != 0:
-                        text += f"({parents[i]})"
-            cv2.putText(img, text, (int(x), int(y)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    return img
+        
+        if border_width > 0:
+            viz = cv2.rectangle(
+                viz,
+                (border_width, border_width),
+                (viz.shape[1] - border_width, viz.shape[0] - border_width),
+                (0, 0, 255), 1
+            )
+
+        # Save the visualization
+        if video_name is not None:
+            if video_writer is None:
+                video_basename = video_name.split('.')[0]  # remove available extension
+                video_path = join(viz_dir, f"{video_basename}.{video_format}")
+
+                # choose fourcc encoding based on video format
+                if video_format == 'mp4':
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # H.264 encoding
+                elif video_format == 'avi':
+                    fourcc = cv2.VideoWriter_fourcc(*"XVID")  # AVI encoding
+                else:
+                    raise ValueError(f"Unsupported video format: {video_format}")
+
+                video_writer = cv2.VideoWriter(
+                    video_path,
+                    fourcc,
+                    framerate,
+                    (viz.shape[1], viz.shape[0])
+                )
+            video_writer.write(viz)
+            start_frame += 1
 
 
 def parse_args():
