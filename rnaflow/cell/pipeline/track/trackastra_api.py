@@ -36,3 +36,25 @@ def cell_track(
         outdir=out_dir,
     )
     return ctc_tracks, masks_tracked
+
+if __name__ == "__main__":
+    # Example usage
+    root_dir = Path("path/to/data")
+    img_stack = tiff.imread(root_dir / "images.tif")
+    mask_strack = tiff.imread(root_dir / "masks.tif")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    track_mode = "greedy_nodiv"  # or "greedy", "ilp"
+    dst_dir = root_dir / f'trackastra_{track_mode}'
+    dst_file = str(dst_dir) + '.tif'
+    
+    ctc_tracks, masks_tracked = cell_track(
+        imgs=img_stack,
+        masks=mask_strack,
+        device=device,
+        out_dir=dst_dir,
+        model_name="general_2d",
+        mode=track_mode
+    )
+    
+    tiff.imwrite(dst_file, masks_tracked)
