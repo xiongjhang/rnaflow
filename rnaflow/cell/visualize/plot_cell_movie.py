@@ -8,6 +8,8 @@ import tifffile as tiff
 import cv2
 import numpy as np
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, Future
+import timeit
 
 from ctc_metrics.utils.filesystem import read_tracking_file
 
@@ -42,8 +44,7 @@ def load_frame_data(img_path, res_path):
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     
     res_img = tiff.imread(res_path).squeeze()
-    assert res_img.ndim == 2 and img.shape == res_img.shape, \
-        "Result image must be 2D (single channel) and match the image shape"
+    assert res_img.ndim == 2, "Result image must be 2D (single channel)"
     return img, res_img
 
 def create_colored_image(
@@ -141,6 +142,7 @@ def visualize(
         trajectory_thickness: int = 2,
         ids_to_show: list = None,
         start_frame: int = 0,
+        end_frame: int = None,
         framerate: int = 30,
         opacity: float = 0.5,
 ):  # pylint: disable=too-many-arguments,too-complex,too-many-locals
@@ -176,6 +178,8 @@ def visualize(
             The IDs of the instances to show. All others will be ignored.
         start_frame: int
             The frame to start the visualization.
+        end_frame: int
+            The frame to end the visualization. If None, visualizes all frames.
         framerate: int
             The framerate of the video.
         opacity: float
@@ -199,8 +203,8 @@ def visualize(
                 ) from exc
 
     # Load image and tracking data
-    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")]
-    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")]
+    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")][:20]
+    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")][:20]
     tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
     parents = {l[0]: l[3] for l in tracking_data}
 
@@ -435,85 +439,102 @@ def visualize_parallel(
     max_trajectory_length = trajectory_length
     base_trajectory_thickness = trajectory_thickness
 
-    # Loop through all images
-    while start_frame < len(images):
-        # Read image file
-        img_name, res_name = images[start_frame], results[start_frame]
-        img_path, res_path,  = join(img_dir, img_name), join(res_dir, res_name)
-        print(f"\rFrame {img_name} (of {len(images)})", end="")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future: Optional[Future] = None
 
-        # Visualize the image
-        img, res_img = load_frame_data(img_path, res_path)
-        
-        # Update trajectory history
-        if show_trajectories:
-            current_centers = {}
-            for i in np.unique(res_img):
-                if i == 0:
-                    continue
-                mask = res_img == i
-                y, x = np.where(mask)
-                center = (int(np.mean(x)), int(np.mean(y)))
-                current_centers[i] = center
-                
-            # Update history for existing trajectories
-            for obj_id in list(trajectory_history.keys()):
-                if obj_id in current_centers:
-                    trajectory_history[obj_id].append(current_centers[obj_id])
-                    # Trim to max length
-                    if len(trajectory_history[obj_id]) > max_trajectory_length:
-                        trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
-                else:
-                    # Remove trajectories for objects that disappeared
-                    del trajectory_history[obj_id]
+        # Loop through all images
+        while start_frame < len(images):
+            # Read image file
+            img_name, res_name = images[start_frame], results[start_frame]
+            img_path, res_path,  = join(img_dir, img_name), join(res_dir, res_name)
+            print(f"\rFrame {img_name} (of {len(images)})", end="")
+
+            # Load the next frame asynchronously
+            if future is None:
+                # Load the next frame data
+                future = executor.submit(load_frame_data, img_path, res_path)
             
-            # Add new objects
-            for obj_id in current_centers:
-                if obj_id not in trajectory_history:
-                    trajectory_history[obj_id] = [current_centers[obj_id]]
+            img, res_img = future.result()
 
-        viz = create_colored_image(
-            img,
-            res_img,
-            labels=show_labels,
-            frame=start_frame,
-            parents=parents if show_parents else None,
-            ids_to_show=ids_to_show,
-            opacity=opacity,
-            trajectories=trajectory_history if show_trajectories else None,
-            trajectory_thickness=trajectory_thickness
-        )
-        
-        if border_width > 0:
-            viz = cv2.rectangle(
-                viz,
-                (border_width, border_width),
-                (viz.shape[1] - border_width, viz.shape[0] - border_width),
-                (0, 0, 255), 1
+            # Submit the next frame for loading
+            next_frame = start_frame + 1
+            if next_frame < len(images):
+                next_img_name, next_res_name = images[next_frame], results[next_frame]
+                next_img_path, next_res_path = join(img_dir, next_img_name), join(res_dir, next_res_name)
+                future = executor.submit(load_frame_data, next_img_path, next_res_path)
+            else:
+                future = None
+            
+            # Update trajectory history
+            if show_trajectories:
+                current_centers = {}
+                for i in np.unique(res_img):
+                    if i == 0:
+                        continue
+                    mask = res_img == i
+                    y, x = np.where(mask)
+                    center = (int(np.mean(x)), int(np.mean(y)))
+                    current_centers[i] = center
+                    
+                # Update history for existing trajectories
+                for obj_id in list(trajectory_history.keys()):
+                    if obj_id in current_centers:
+                        trajectory_history[obj_id].append(current_centers[obj_id])
+                        # Trim to max length
+                        if len(trajectory_history[obj_id]) > max_trajectory_length:
+                            trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
+                    else:
+                        # Remove trajectories for objects that disappeared
+                        del trajectory_history[obj_id]
+                
+                # Add new objects
+                for obj_id in current_centers:
+                    if obj_id not in trajectory_history:
+                        trajectory_history[obj_id] = [current_centers[obj_id]]
+
+            viz = create_colored_image(
+                img,
+                res_img,
+                labels=show_labels,
+                frame=start_frame,
+                parents=parents if show_parents else None,
+                ids_to_show=ids_to_show,
+                opacity=opacity,
+                trajectories=trajectory_history if show_trajectories else None,
+                trajectory_thickness=trajectory_thickness
             )
-
-        # Save the visualization
-        if video_name is not None:
-            if video_writer is None:
-                video_basename = video_name.split('.')[0]  # remove available extension
-                video_path = join(viz_dir, f"{video_basename}.{video_format}")
-
-                # choose fourcc encoding based on video format
-                if video_format == 'mp4':
-                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # H.264 encoding
-                elif video_format == 'avi':
-                    fourcc = cv2.VideoWriter_fourcc(*"XVID")  # AVI encoding
-                else:
-                    raise ValueError(f"Unsupported video format: {video_format}")
-
-                video_writer = cv2.VideoWriter(
-                    video_path,
-                    fourcc,
-                    framerate,
-                    (viz.shape[1], viz.shape[0])
+            
+            if border_width > 0:
+                viz = cv2.rectangle(
+                    viz,
+                    (border_width, border_width),
+                    (viz.shape[1] - border_width, viz.shape[0] - border_width),
+                    (0, 0, 255), 1
                 )
-            video_writer.write(viz)
-            start_frame += 1
+
+            # Save the visualization
+            if video_name is not None:
+                if video_writer is None:
+                    video_basename = video_name.split('.')[0]  # remove available extension
+                    video_path = join(viz_dir, f"{video_basename}.{video_format}")
+
+                    # choose fourcc encoding based on video format
+                    if video_format == 'mp4':
+                        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # H.264 encoding
+                    elif video_format == 'avi':
+                        fourcc = cv2.VideoWriter_fourcc(*"XVID")  # AVI encoding
+                    else:
+                        raise ValueError(f"Unsupported video format: {video_format}")
+
+                    video_writer = cv2.VideoWriter(
+                        video_path,
+                        fourcc,
+                        framerate,
+                        (viz.shape[1], viz.shape[0])
+                    )
+                video_writer.write(viz)
+                start_frame += 1
+                continue
 
 
 def parse_args():
@@ -605,11 +626,11 @@ def main():
     res = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01_GT/_RES'
     viz_dir = '/mnt/sda/xjh/dataset/cell-data/20250722-xiangyu_vis/01_VIS'
 
-    visualize(
-        img,
-        res,
-        viz_dir,
-        video_name='01_video_20f',
+    kwargs = dict(
+        img_dir=img,
+        res_dir=res,
+        viz_dir=viz_dir,
+        # video_name='01_video_20f',
         video_format='mp4',
         border_width=None,
         show_labels=False,
@@ -622,6 +643,25 @@ def main():
         framerate=10,
         opacity=0.5,
     )
+    video_name = '01_video_20f_test'
+    using_parallel = True  # Set to True to use parallel visualization
+
+    start_time = timeit.default_timer()
+
+    if not using_parallel:
+        visualize(
+            video_name=video_name, 
+            **kwargs
+        )
+    else:
+        visualize_parallel(
+            video_name=video_name+'_parallel',
+            **kwargs
+        )
+    
+    end_time = timeit.default_timer()
+    print(f'Parallel visualization: {using_parallel}')
+    print(f"\nVisualization completed in {end_time - start_time:.2f} seconds.")
 
 
 if __name__ == "__main__":
