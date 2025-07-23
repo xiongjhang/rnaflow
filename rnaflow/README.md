@@ -8,6 +8,12 @@ You can visualize the cell data and site data with the code under `visualize/` f
 
 The default result moive format is `mp4`. However, it can not be opened by ImageJ. You can using `ffmpeg` to convert it to a format that ImageJ can read. For this issue, you can refer to [AVI unsupported compression error](https://forum.image.sc/t/avi-unsupported-compression-error/4008)
 
+To check if your `ffmpeg` is installed, you can run the following command:
+
+```bash
+ffmpeg -version
+```
+
 To make it readble by ImageJ, you need to convert it to `avi` format with the following command:
 
 ```bash
