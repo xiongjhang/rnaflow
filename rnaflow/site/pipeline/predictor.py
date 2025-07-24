@@ -11,8 +11,8 @@ import scipy.optimize
 from skimage import measure
 import trackpy as tp
 
-from pipeline.spotlearn import SpotlearnNet
-from pipeline.utils import *
+from rnaflow.site.pipeline.spotlearn import SpotlearnNet
+from rnaflow.site.pipeline.utils import *
 
 
 def read_csv(csv_path: PathType) -> pd.DataFrame:
@@ -535,7 +535,8 @@ class SitePredictor:
     ):
         """Plot the raw stack with label based on the tracked coordinates."""
         if not self.patch_coor_reg_path.exists():
-            raise ValueError(f'{self.patch_coor_reg_path} is not existing!')
+            return
+            # raise ValueError(f'{self.patch_coor_reg_path} is not existing!')
         
         raw_stack_with_label = self.raw_stack.copy()
         rigid_transform = get_global_transform(self.reg_transform_path, self.num_frame)
