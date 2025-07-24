@@ -2,7 +2,15 @@
 
 When process very big images, it will be very slow, e.g., for a 6997*2048 img,
 it will take avout 8s to update the trajectories and 15s to create the visualization.
+- in `create_colored_image`, most of time is spent on drawing objects than trajectories
 
+This two step is the bottleneck of the visualization.
+
+*Note:* Progress time is also affected by the number of objects in the image and 
+the length of the trajectories of each object.
+
+After optimization, 
+ - it will take about 0.1s to update the trajectories
 '''
 
 import argparse
@@ -16,6 +24,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
 import timeit
 import time
+from skimage import measure
 
 from ctc_metrics.utils.filesystem import read_tracking_file
 
@@ -93,6 +102,7 @@ def create_colored_image(
     kernel = np.ones((3, 3), dtype=np.uint8)
     
     # Draw trajectories first (so they appear behind the objects)
+    start = time.time()
     if trajectories is not None:
         for obj_id, points in trajectories.items():
             if ids_to_show is not None and obj_id not in ids_to_show:
@@ -102,8 +112,10 @@ def create_colored_image(
                 for i in range(1, len(points)):
                     thickness = max(1, int(trajectory_thickness * (i / len(points))))
                     cv2.line(img, points[i-1], points[i], color, thickness)
+    print(f"Plot- draw trajectories drawn in {time.time() - start:.2f} seconds.")
     
     # Draw objects
+    start = time.time()
     for i in np.unique(res):
         if i == 0:
             continue
@@ -132,6 +144,7 @@ def create_colored_image(
                         text += f"({parents[i]})"
             cv2.putText(img, text, (int(x), int(y)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    print(f"Plot- draw objects drawn in {time.time() - start:.2f} seconds.")
     return img
 
 def visualize(
@@ -243,29 +256,31 @@ def visualize(
         start = time.time()
         if show_trajectories:
             current_centers = {}
-            for i in np.unique(res_img):
-                if i == 0:
+            props = measure.regionprops(res_img.astype(int))
+            for prop in props:
+                obj_id = prop.label
+                if obj_id == 0:
                     continue
-                mask = res_img == i
-                y, x = np.where(mask)
-                center = (int(np.mean(x)), int(np.mean(y)))
-                current_centers[i] = center
-                
-            # Update history for existing trajectories
-            for obj_id in list(trajectory_history.keys()):
-                if obj_id in current_centers:
-                    trajectory_history[obj_id].append(current_centers[obj_id])
-                    # Trim to max length
-                    if len(trajectory_history[obj_id]) > max_trajectory_length:
-                        trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
-                else:
-                    # Remove trajectories for objects that disappeared
-                    del trajectory_history[obj_id]
-            
+                center = (int(prop.centroid[1]), int(prop.centroid[0]))  # (x,y)
+                current_centers[obj_id] = center
+
+            existing_ids = set(trajectory_history.keys())
+            current_ids = set(current_centers.keys())
+
+            # Remove trajectories for objects that disappeared
+            for obj_id in list(existing_ids - current_ids):
+                del trajectory_history[obj_id]
+
+            # Update existing trajectories
+            for obj_id in list(existing_ids & current_ids):
+                trajectory_history[obj_id].append(current_centers[obj_id])
+                # Trim to max length
+                if len(trajectory_history[obj_id]) > max_trajectory_length:
+                    trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
+
             # Add new objects
-            for obj_id in current_centers:
-                if obj_id not in trajectory_history:
-                    trajectory_history[obj_id] = [current_centers[obj_id]]
+            for new_id in current_ids - existing_ids:
+                trajectory_history[new_id] = [current_centers[new_id]]
         print(f"Updated trajectories in {time.time() - start:.2f} seconds.")
 
         start = time.time()
@@ -312,9 +327,9 @@ def visualize(
                     (viz.shape[1], viz.shape[0])
                 )
             video_writer.write(viz)
+            print(f"Saved visualization in {time.time() - start:.2f} seconds.")
             start_frame += 1
             continue
-        print(f"Saved visualization in {time.time() - start:.2f} seconds.")
 
         # Show the video
         cv2.imshow("VIZ", viz)
