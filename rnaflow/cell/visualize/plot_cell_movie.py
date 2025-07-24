@@ -398,192 +398,6 @@ def visualize(
             # Move to the next frame
             start_frame += 1
 
-def visualize_parallel(
-        img_dir: str,
-        res_dir: str,
-        viz_dir: str = None,
-        video_name: str = None,
-        video_format: Literal['mp4', 'avi'] = 'mp4',
-        border_width: str = None,
-        show_labels: bool = True,
-        show_parents: bool = True,
-        show_trajectories: bool = True,
-        trajectory_length: int = 10,
-        trajectory_thickness: int = 2,
-        ids_to_show: list = None,
-        start_frame: int = 0,
-        framerate: int = 30,
-        opacity: float = 0.5,
-):  # pylint: disable=too-many-arguments,too-complex,too-many-locals
-    """
-    Visualizes the tracking results.
-
-    Args:
-        img_dir: str
-            The path to the images.
-        res_dir: str
-            The path to the results.
-        viz_dir: str
-            The path to save the visualizations.
-        video_name: str
-            The base name of the video file to save. If None, no video will be created.
-            Note that no visualization is available during video creation.
-        video_format: Literal['mp4', 'avi']
-            The format of the video to save. Default is 'mp4'.
-        border_width: str or int
-            The width of the border. Either an integer or a string that
-            describes the challenge name.
-        show_labels: bool
-            Print instance labels to the output.
-        show_parents: bool
-            Print parent labels to the output.
-        show_trajectories: bool
-            Show movement trajectories of the instances.
-        trajectory_length: int
-            Number of previous frames to show in the trajectory.
-        trajectory_thickness: int
-            Thickness of the trajectory lines.
-        ids_to_show: list
-            The IDs of the instances to show. All others will be ignored.
-        start_frame: int
-            The frame to start the visualization.
-        framerate: int
-            The framerate of the video.
-        opacity: float
-            The opacity of the instance colors.
-
-    """
-    # Define initial video parameters
-    wait_time = max(1, round(1000 / framerate))
-    if border_width is None:
-        border_width = 0
-    elif isinstance(border_width, str):
-        try:
-            border_width = int(border_width)
-        except ValueError as exc:
-            if border_width in BORDER_WIDTH:
-                border_width = BORDER_WIDTH[border_width]
-            else:
-                raise ValueError(
-                    f"Border width '{border_width}' not recognized. "
-                    f"Existing datasets: {BORDER_WIDTH.keys()}"
-                ) from exc
-
-    # Load image and tracking data
-    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")]
-    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")]
-    tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
-    parents = {l[0]: l[3] for l in tracking_data}
-
-    # Create visualization directory
-    if viz_dir:
-        makedirs(viz_dir, exist_ok=True)
-
-    video_writer = None
-    
-    # Initialize trajectory tracking
-    trajectory_history = defaultdict(list)
-    max_trajectory_length = trajectory_length
-    base_trajectory_thickness = trajectory_thickness
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future: Optional[Future] = None
-
-        # Loop through all images
-        while start_frame < len(images):
-            # Read image file
-            img_name, res_name = images[start_frame], results[start_frame]
-            img_path, res_path,  = join(img_dir, img_name), join(res_dir, res_name)
-            print(f"\rFrame {img_name} (of {len(images)})", end="")
-
-            # Load the next frame asynchronously
-            if future is None:
-                # Load the next frame data
-                future = executor.submit(load_frame_data, img_path, res_path)
-            
-            img, res_img = future.result()
-
-            # Submit the next frame for loading
-            next_frame = start_frame + 1
-            if next_frame < len(images):
-                next_img_name, next_res_name = images[next_frame], results[next_frame]
-                next_img_path, next_res_path = join(img_dir, next_img_name), join(res_dir, next_res_name)
-                future = executor.submit(load_frame_data, next_img_path, next_res_path)
-            else:
-                future = None
-            
-            # Update trajectory history
-            if show_trajectories:
-                current_centers = {}
-                for i in np.unique(res_img):
-                    if i == 0:
-                        continue
-                    mask = res_img == i
-                    y, x = np.where(mask)
-                    center = (int(np.mean(x)), int(np.mean(y)))
-                    current_centers[i] = center
-                    
-                # Update history for existing trajectories
-                for obj_id in list(trajectory_history.keys()):
-                    if obj_id in current_centers:
-                        trajectory_history[obj_id].append(current_centers[obj_id])
-                        # Trim to max length
-                        if len(trajectory_history[obj_id]) > max_trajectory_length:
-                            trajectory_history[obj_id] = trajectory_history[obj_id][-max_trajectory_length:]
-                    else:
-                        # Remove trajectories for objects that disappeared
-                        del trajectory_history[obj_id]
-                
-                # Add new objects
-                for obj_id in current_centers:
-                    if obj_id not in trajectory_history:
-                        trajectory_history[obj_id] = [current_centers[obj_id]]
-
-            viz = create_colored_image(
-                img,
-                res_img,
-                labels=show_labels,
-                frame=start_frame,
-                parents=parents if show_parents else None,
-                ids_to_show=ids_to_show,
-                opacity=opacity,
-                trajectories=trajectory_history if show_trajectories else None,
-                trajectory_thickness=trajectory_thickness
-            )
-            
-            if border_width > 0:
-                viz = cv2.rectangle(
-                    viz,
-                    (border_width, border_width),
-                    (viz.shape[1] - border_width, viz.shape[0] - border_width),
-                    (0, 0, 255), 1
-                )
-
-            # Save the visualization
-            if video_name is not None:
-                if video_writer is None:
-                    video_basename = video_name.split('.')[0]  # remove available extension
-                    video_path = join(viz_dir, f"{video_basename}.{video_format}")
-
-                    # choose fourcc encoding based on video format
-                    if video_format == 'mp4':
-                        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # H.264 encoding
-                    elif video_format == 'avi':
-                        fourcc = cv2.VideoWriter_fourcc(*"XVID")  # AVI encoding
-                    else:
-                        raise ValueError(f"Unsupported video format: {video_format}")
-
-                    video_writer = cv2.VideoWriter(
-                        video_path,
-                        fourcc,
-                        framerate,
-                        (viz.shape[1], viz.shape[0])
-                    )
-                video_writer.write(viz)
-                start_frame += 1
-                continue
-
-
 def parse_args():
     """ Parses the arguments. """
     parser = argparse.ArgumentParser(description='Validates CTC-Sequences.')
@@ -673,11 +487,13 @@ def main():
     res = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01_GT/_RES'
     viz_dir = '/mnt/sda/xjh/dataset/cell-data/20250722-xiangyu_vis/01_VIS'
 
-    kwargs = dict(
+
+    start_time = timeit.default_timer()
+    visualize(
         img_dir=img,
         res_dir=res,
         viz_dir=viz_dir,
-        # video_name='01_video_20f',
+        video_name='01_video_20f',
         video_format='mp4',
         border_width=None,
         show_labels=False,
@@ -690,24 +506,7 @@ def main():
         framerate=10,
         opacity=0.5,
     )
-    video_name = '01_video_20f_test'
-    using_parallel = False  # Set to True to use parallel visualization
-
-    start_time = timeit.default_timer()
-
-    if not using_parallel:
-        visualize(
-            video_name=video_name, 
-            **kwargs
-        )
-    else:
-        visualize_parallel(
-            video_name=video_name+'_parallel',
-            **kwargs
-        )
-    
     end_time = timeit.default_timer()
-    print(f'Parallel visualization: {using_parallel}')
     print(f"\nVisualization completed in {end_time - start_time:.2f} seconds.")
 
 
