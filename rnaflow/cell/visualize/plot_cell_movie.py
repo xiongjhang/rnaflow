@@ -3,6 +3,7 @@
 When process very big images, it will be very slow, e.g., for a 6997*2048 img,
 it will take avout 8s to update the trajectories and 15s to create the visualization.
 - in `create_colored_image`, most of time is spent on drawing objects than trajectories
+- when `labels` and `parents` are set to False
 
 This two step is the bottleneck of the visualization.
 
@@ -11,6 +12,7 @@ the length of the trajectories of each object.
 
 After optimization, 
  - it will take about 0.1s to update the trajectories
+ - it will take about 9s to create the visualization
 '''
 
 import argparse
@@ -100,15 +102,21 @@ def create_colored_image(
     """
     img = np.clip(img, 0, 255).astype(np.uint8)
     kernel = np.ones((3, 3), dtype=np.uint8)
+
+    uniqu_ids = np.unique(res)
+    valid_ids = uniqu_ids[uniqu_ids > 0]
+    if ids_to_show is not None:
+        valid_ids = np.intersect1d(valid_ids, ids_to_show)
+    palette_colors = {i: get_palette_color(i) for i in valid_ids}
     
     # Draw trajectories first (so they appear behind the objects)
     start = time.time()
     if trajectories is not None:
         for obj_id, points in trajectories.items():
-            if ids_to_show is not None and obj_id not in ids_to_show:
+            if obj_id not in valid_ids:
                 continue
             if len(points) > 1:
-                color = get_palette_color(obj_id).tolist()
+                color = palette_colors[obj_id].tolist()
                 for i in range(1, len(points)):
                     thickness = max(1, int(trajectory_thickness * (i / len(points))))
                     cv2.line(img, points[i-1], points[i], color, thickness)
@@ -116,20 +124,14 @@ def create_colored_image(
     
     # Draw objects
     start = time.time()
-    for i in np.unique(res):
-        if i == 0:
-            continue
-        if ids_to_show is not None:
-            if i not in ids_to_show:
-                continue
+    for i in valid_ids:
         mask = res == i
-        contour = (mask * 255).astype(np.uint8) - \
-                  cv2.erode((mask * 255).astype(np.uint8), kernel)
-        contour = contour != 0
+        contour = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_GRADIENT, kernel).astype(bool)
+        color = palette_colors[i]
         img[mask] = (
-            np.round((1 - opacity) * img[mask] + opacity * get_palette_color(i))
+            np.round((1 - opacity) * img[mask] + opacity * color)
         )
-        img[contour] = get_palette_color(i)
+        img[contour] = color
         if frame is not None:
             cv2.putText(img, str(frame), (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
