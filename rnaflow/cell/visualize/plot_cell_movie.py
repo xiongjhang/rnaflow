@@ -12,7 +12,7 @@ the length of the trajectories of each object.
 
 After optimization, 
  - it will take about 0.1s to update the trajectories
- - it will take about 9s to create the visualization
+ - it will take about 0.2s to create the visualization
 '''
 
 import argparse
@@ -103,11 +103,18 @@ def create_colored_image(
     img = np.clip(img, 0, 255).astype(np.uint8)
     kernel = np.ones((3, 3), dtype=np.uint8)
 
-    uniqu_ids = np.unique(res)
-    valid_ids = uniqu_ids[uniqu_ids > 0]
-    if ids_to_show is not None:
-        valid_ids = np.intersect1d(valid_ids, ids_to_show)
-    palette_colors = {i: get_palette_color(i) for i in valid_ids}
+    props = measure.regionprops(res.astype(int))
+
+    valid_props = []
+    for prop in props:
+        obj_id = prop.label
+        if obj_id == 0:
+            continue
+        if ids_to_show is not None and obj_id not in ids_to_show:
+            continue
+        valid_props.append(prop)
+    valid_ids = [prop.label for prop in valid_props]
+    palette_colors = {prop.label: get_palette_color(prop.label) for prop in valid_props}
     
     # Draw trajectories first (so they appear behind the objects)
     start = time.time()
@@ -124,27 +131,34 @@ def create_colored_image(
     
     # Draw objects
     start = time.time()
-    for i in valid_ids:
-        mask = res == i
-        contour = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_GRADIENT, kernel).astype(bool)
-        color = palette_colors[i]
-        img[mask] = (
-            np.round((1 - opacity) * img[mask] + opacity * color)
+    for prop in valid_props:
+        obj_id = prop.label
+        color = palette_colors[obj_id]
+
+        min_row, min_col, max_row, max_col = prop.bbox
+        mask = res[min_row:max_row, min_col:max_col] == obj_id
+        contour = cv2.morphologyEx(
+            mask.astype(np.uint8), cv2.MORPH_GRADIENT, kernel
+        ).astype(bool)
+
+        img_slice = img[min_row:max_row, min_col:max_col]
+        img_slice[mask] = (
+            np.round((1 - opacity) * img_slice[mask] + opacity * color)
         )
-        img[contour] = color
+        img_slice[contour] = color
+
         if frame is not None:
             cv2.putText(img, str(frame), (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         if labels:
             # Print label to the center of the object
-            y, x = np.where(mask)
-            y, x = np.mean(y), np.mean(x)
-            text = str(i)
+            center = (int(prop.centroid[1]), int(prop.centroid[0]))  # (x,y)
+            text = str(obj_id)
             if parents is not None:
                 if i in parents:
                     if parents[i] != 0:
                         text += f"({parents[i]})"
-            cv2.putText(img, text, (int(x), int(y)),
+            cv2.putText(img, text, center,
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     print(f"Plot- draw objects drawn in {time.time() - start:.2f} seconds.")
     return img
