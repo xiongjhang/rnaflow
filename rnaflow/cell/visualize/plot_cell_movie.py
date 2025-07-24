@@ -1,4 +1,9 @@
-'''https://github.com/CellTrackingChallenge/py-ctcmetrics/blob/main/ctc_metrics/scripts/visualize.py'''
+'''https://github.com/CellTrackingChallenge/py-ctcmetrics/blob/main/ctc_metrics/scripts/visualize.py
+
+When process very big images, it will be very slow, e.g., for a 6997*2048 img,
+it will take avout 8s to update the trajectories and 15s to create the visualization.
+
+'''
 
 import argparse
 from typing import Literal, Optional
@@ -10,6 +15,7 @@ import numpy as np
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
 import timeit
+import time
 
 from ctc_metrics.utils.filesystem import read_tracking_file
 
@@ -203,10 +209,12 @@ def visualize(
                 ) from exc
 
     # Load image and tracking data
+    start = time.time()
     images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")][:20]
     results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")][:20]
     tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
     parents = {l[0]: l[3] for l in tracking_data}
+    print(f"Loaded {len(images)} images and {len(results)} results in {time.time() - start:.2f} seconds.")
 
     # Create visualization directory
     if viz_dir:
@@ -227,9 +235,12 @@ def visualize(
         print(f"\rFrame {img_name} (of {len(images)})", end="")
 
         # Visualize the image
+        start = time.time()
         img, res_img = load_frame_data(img_path, res_path)
+        print(f"Loaded in {time.time() - start:.2f} seconds.")
         
         # Update trajectory history
+        start = time.time()
         if show_trajectories:
             current_centers = {}
             for i in np.unique(res_img):
@@ -255,7 +266,9 @@ def visualize(
             for obj_id in current_centers:
                 if obj_id not in trajectory_history:
                     trajectory_history[obj_id] = [current_centers[obj_id]]
+        print(f"Updated trajectories in {time.time() - start:.2f} seconds.")
 
+        start = time.time()
         viz = create_colored_image(
             img,
             res_img,
@@ -267,6 +280,7 @@ def visualize(
             trajectories=trajectory_history if show_trajectories else None,
             trajectory_thickness=trajectory_thickness
         )
+        print(f"Created visualization in {time.time() - start:.2f} seconds.")
         
         if border_width > 0:
             viz = cv2.rectangle(
@@ -277,6 +291,7 @@ def visualize(
             )
 
         # Save the visualization
+        start = time.time()
         if video_name is not None:
             if video_writer is None:
                 video_basename = video_name.split('.')[0]  # remove available extension
@@ -299,6 +314,7 @@ def visualize(
             video_writer.write(viz)
             start_frame += 1
             continue
+        print(f"Saved visualization in {time.time() - start:.2f} seconds.")
 
         # Show the video
         cv2.imshow("VIZ", viz)
@@ -644,7 +660,7 @@ def main():
         opacity=0.5,
     )
     video_name = '01_video_20f_test'
-    using_parallel = True  # Set to True to use parallel visualization
+    using_parallel = False  # Set to True to use parallel visualization
 
     start_time = timeit.default_timer()
 
