@@ -179,3 +179,5 @@ data_example/
 
 # lauch scripts (temporary)
 run*
+
+.vscode/
