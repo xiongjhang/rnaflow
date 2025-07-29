@@ -9,7 +9,7 @@ from pathlib import Path
 
 from cellpose.io import imread
 
-def get_image_files(folder, mask_filter, imf=None, look_one_level_down=False):
+def get_image_files(folder, mask_filter, imf=None, recursive=False):
     """
     Finds all images in a folder and its subfolders (if specified) with the given file extensions.
 
@@ -17,7 +17,7 @@ def get_image_files(folder, mask_filter, imf=None, look_one_level_down=False):
         folder (str): The path to the folder to search for images.
         mask_filter (str): The filter for mask files.
         imf (str, optional): The additional filter for image files. Defaults to None.
-        look_one_level_down (bool, optional): Whether to search for images in subfolders. Defaults to False.
+        recursive (bool, optional): Whether to search recursively in subfolders. Defaults to False.
 
     Returns:
         list: A list of image file paths.
@@ -33,19 +33,21 @@ def get_image_files(folder, mask_filter, imf=None, look_one_level_down=False):
     if imf is None:
         imf = ""
 
-    folders = []
-    if look_one_level_down:
-        folders = natsorted(glob.glob(os.path.join(folder, "*/")))
-    folders.append(folder)
     exts = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".flex", ".dax", ".nd2", ".nrrd"]
+    ext_patterns = [f"*{imf}{ext}" for ext in exts] + [f"*{imf}{ext.upper()}" for ext in exts]
+
+    folders = []
+    if recursive:
+        for root, dirs, files in os.walk(folder):
+            folders.append(root)
+
     l0 = 0
     al = 0
     for folder in folders:
         all_files = glob.glob(folder + "/*")
         al += len(all_files)
-        for ext in exts:
-            image_names.extend(glob.glob(folder + f"/*{imf}{ext}"))
-            image_names.extend(glob.glob(folder + f"/*{imf}{ext.upper()}"))
+        for ext_pattern in ext_patterns:
+            image_names.extend(glob.glob(os.path.join(folder, ext_pattern)))
         l0 += len(image_names)
 
     # return error if no files found
@@ -117,7 +119,7 @@ def get_label_files(image_names, mask_filter, imf=None):
     return label_names
 
 def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
-                       look_one_level_down=False):
+                       recusive=False, read_data: bool = True):
     """
     Loads images and corresponding labels from a directory.
 
@@ -125,12 +127,13 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
         tdir (str): The directory path.
         mask_filter (str, optional): The filter for mask files. Defaults to "_masks".
         image_filter (str, optional): The filter for image files. Defaults to None.
-        look_one_level_down (bool, optional): Whether to look for files one level down. Defaults to False.
+        recusive (bool, optional): Whether to search recursively in subfolders. Defaults to False.
+        read_data (bool, optional): Whether to read the data from the files. Defaults to True.
 
     Returns:
         tuple: A tuple containing a list of images, a list of labels, and a list of image names.
     """
-    image_names = get_image_files(tdir, mask_filter, image_filter, look_one_level_down)
+    image_names = get_image_files(tdir, mask_filter, image_filter, recusive)
     nimg = len(image_names)
 
     # training data
@@ -139,13 +142,14 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
     
     images = []
     labels = []
-    k = 0
-    for n in range(nimg):
-        if os.path.isfile(label_names[n]):
-            image = imread(image_names[n])
-            if label_names is not None:
-                label = imread(label_names[n])
-            images.append(image)
-            labels.append(label)
-            k += 1
+    if read_data:
+        k = 0
+        for n in range(nimg):
+            if os.path.isfile(label_names[n]):
+                image = imread(image_names[n])
+                if label_names is not None:
+                    label = imread(label_names[n])
+                images.append(image)
+                labels.append(label)
+                k += 1
     return images, labels, image_names
