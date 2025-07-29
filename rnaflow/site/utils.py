@@ -40,6 +40,7 @@ def get_image_files(folder, mask_filter, imf=None, recursive=False):
     if recursive:
         for root, dirs, files in os.walk(folder):
             folders.append(root)
+    folders.append(folder)
 
     l0 = 0
     al = 0
