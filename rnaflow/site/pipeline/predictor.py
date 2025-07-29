@@ -145,21 +145,32 @@ class SitePredictor:
         tiff.imwrite(self.det_raw_path, det_raw, imagej=True)
 
     # region cell registration
-
-    def registration_recursive(self):
-        raw_stack = tiff.imread(self.raw_path).squeeze().astype('float32')
-        mask_stack = tiff.imread(self.det_raw_path)[1]
+    @staticmethod
+    def registration_recursive(
+        raw_stack: np.array,
+        mask_stack: np.array
+    ) -> Tuple[np.ndarray, list]:
+        """Cell sequence recursive registration.
+        
+        Args:
+            raw_stack (np.ndarray): The raw cell sequence stack.
+            mask_stack (np.ndarray): The mask stack of the cell sequence.
+        Returns:
+            Tuple[np.ndarray, list]: A tuple containing the registered image stack and the last composite transform."""
+        num_frame = len(raw_stack)
         assert raw_stack.ndim == 3 and mask_stack.ndim == 3
+        assert raw_stack.shape == mask_stack.shape, \
+            f"Expected raw_stack and mask_stack to have the same shape, got {raw_stack.shape} and {mask_stack.shape}"
         
         last_composite_transform = []  # final composite transform
         final_cell_registered_stack = []  # save registered img
-        final_cell_registered_stack.append(self.raw_stack[0])
+        final_cell_registered_stack.append(raw_stack[0])
         final_mask_registered_stack = []  # save registered mask
         final_mask_registered_stack.append(mask_stack[0])
 
         composite_transform = sitk.CompositeTransform(2)
 
-        for i in range(1, self.num_frame):
+        for i in range(1, num_frame):
             fixed_image = sitk.GetImageFromArray(raw_stack[i - 1])  # moving_registered_stack only resample once
             moving_frame = sitk.GetImageFromArray(raw_stack[i])  # reg_stack
             moving_frame.SetSpacing(fixed_image.GetSpacing())
@@ -174,7 +185,7 @@ class SitePredictor:
         last_composite_transform.append(composite_transform)  # for revovery
 
         # image recursive registration
-        final_cell_registered_stack = image_registration_recursive(self.raw_stack, composite_transform, final_cell_registered_stack)
+        final_cell_registered_stack = image_registration_recursive(raw_stack, composite_transform, final_cell_registered_stack)
         reg_stack = np.array(final_cell_registered_stack)
         # tiff.imwrite(os.path.join(cell_folder, 'cell_reg.tif'), reg_img)
 
@@ -189,6 +200,16 @@ class SitePredictor:
         # tiff.imwrite(os.path.join(cell_folder, 'cell_mask_reg.tif'), final_mask_registered_stack)
 
         det_reg = np.stack((reg_stack, final_mask_registered_stack))
+
+        return det_reg, last_composite_transform
+
+    def site_reg(self):
+        """Pipeline method for cell registration."""
+        raw_stack = tiff.imread(self.raw_path).squeeze().astype('float32')
+        mask_stack = tiff.imread(self.det_raw_path)[1]
+
+        det_reg, last_composite_transform = self.registration_recursive(raw_stack, mask_stack)
+        
         tiff.imwrite(self.det_reg_path, det_reg, imagej=True)
 
         with open(self.reg_transform_path, 'wb') as file:
