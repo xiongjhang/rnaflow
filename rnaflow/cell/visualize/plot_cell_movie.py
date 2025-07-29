@@ -239,8 +239,8 @@ def visualize(
 
     # Load image and tracking data
     start = time.time()
-    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")][:20]
-    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")][:20]
+    images = [x for x in sorted(listdir(img_dir)) if x.endswith(".tif")]
+    results = [x for x in sorted(listdir(res_dir)) if x.endswith(".tif")]
     tracking_data = read_tracking_file(join(res_dir, "res_track.txt"))
     parents = {l[0]: l[3] for l in tracking_data}
     print(f"Loaded {len(images)} images and {len(results)} results in {time.time() - start:.2f} seconds.")
@@ -483,9 +483,9 @@ def main():
     viz_dir = r'D:\dataset\cell-data\vis_xiangyu\240129D0_F007\01_VIS'
 
     # LLS dataset
-    img = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01'
-    res = '/mnt/sda/cell_data/LLS_SOX2_20240904/LLS_SOX2_01/01_GT/_RES'
-    viz_dir = '/mnt/sda/xjh/dataset/cell-data/20250722-xiangyu_vis/01_VIS'
+    img = '/mnt/sda/xjh/dataset/cell-data/test_pipeline/sox2_nim_2h_LLS/sox2_nim_2h_LLS/sox2_nim_2h_LLS/01'
+    res = '/mnt/sda/xjh/dataset/cell-data/test_pipeline/sox2_nim_2h_LLS/sox2_nim_2h_LLS/sox2_nim_2h_LLS/01_TRACK/trackastra'
+    viz_dir = '/mnt/sda/xjh/dataset/cell-data/20250725-xiangyu_vis/sox2_nim_2h_LLS'
 
 
     start_time = timeit.default_timer()
@@ -493,7 +493,7 @@ def main():
         img_dir=img,
         res_dir=res,
         viz_dir=viz_dir,
-        video_name='01_video_20f',
+        video_name='01_video_cpsam',
         video_format='mp4',
         border_width=None,
         show_labels=False,
