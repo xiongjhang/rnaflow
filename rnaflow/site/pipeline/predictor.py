@@ -87,6 +87,8 @@ class SitePredictor:
         raw_stack: np.ndarray,
         model_path: Union[str, Path],
         out_threshold: float = 0.9,
+        min_region: int = 2,
+        max_region: int = 12,
         device: Optional[str] = None,
     ) -> np.ndarray:
         '''Detect sites using Spotlearn model.'''
@@ -118,7 +120,7 @@ class SitePredictor:
                     label_image = measure.label(mask, connectivity=2)
                     regions = measure.regionprops(label_image)
                     for region in regions:
-                        if region.area <= 4: # or region.area >= 12:
+                        if region.area <= min_region: # or region.area >= max_region:
                             mask[label_image == region.label] = 0
                     return mask
                 
@@ -274,7 +276,7 @@ class SitePredictor:
             num_frame (int): Number of frames in the sequence.
             search_range (int): Search range for linking sites.
             memory (int): Memory parameter for linking sites.
-            patch_thres (int): Threshold for filtering short tracks.
+            patch_thres (int): Minimum number of sites in a patch to be considered valid.
         """
         patch_res = None
         # patch generation and filter
