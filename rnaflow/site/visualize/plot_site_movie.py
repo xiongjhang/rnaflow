@@ -108,6 +108,7 @@ def visualize(
         framerate: int = 30,
         using_tp: bool = False,
         resize_factor: int = 1,
+        add_reg_space: bool = True,
 ):
     """
     Visualize the cell trajectory on the cell sequence.
@@ -145,6 +146,8 @@ def visualize(
             Only affective if `draw_mode` is 'box'.
         resize_factor : int, default 1
             Factor by which to resize the images for visualization.
+        add_reg_space : bool, default True
+            Whether to add the registered space image next to the original image in the visualization.
     """
     # Check input validity
     assert img.shape == img_reg.shape, \
@@ -157,7 +160,7 @@ def visualize(
                        interpolation=cv2.INTER_LINEAR)
     img_reg_0 = cv2.resize(img_reg[0], (img_reg[0].shape[1] * resize_factor, img_reg[0].shape[0] * resize_factor),
                            interpolation=cv2.INTER_LINEAR)
-    combined_frame = np.hstack((img_0, img_reg_0))
+    combined_frame = np.hstack((img_0, img_reg_0)) if add_reg_space else img_0
 
     # Create visualization directory
     if viz_dir:
@@ -224,16 +227,17 @@ def visualize(
                 trajectory_thickness=base_trajectory_thickness
             )
             
-            viz_reg = create_colored_image(
-                frame_reg, reg_traj, site_id,
-                frame=t, 
-                plot_frame=False,
-                alpha=alpha, draw_mode=draw_mode,
-                trajectory_thickness=base_trajectory_thickness
-            )
+            if add_reg_space:
+                viz_reg = create_colored_image(
+                    frame_reg, reg_traj, site_id,
+                    frame=t, 
+                    plot_frame=False,
+                    alpha=alpha, draw_mode=draw_mode,
+                    trajectory_thickness=base_trajectory_thickness
+                )
 
             # Combine the visualized frames
-            combined_frame = np.hstack((viz_org, viz_reg))
+            combined_frame = np.hstack((viz_org, viz_reg)) if add_reg_space else viz_org
 
             # Save the visualized frames
             if video_writer:
@@ -245,25 +249,33 @@ def visualize(
 
 def main():
 
-    data_dir = '/mnt/sda/xjh/dataset/site-data/20250721-xiangyu_vis/cellraw_12250'
-    img = tiff.imread(join(data_dir, 'imgs_raw_mask.tif'))[0]
-    img_reg = tiff.imread(join(data_dir, 'imgs_raw_mask_reg_rcs.tif'))[0]
-    traj_data = {
-        0: pd.read_csv(join(data_dir, 'dataAnalysis_tj_0_withBg.csv')),
-    }
+    root = '/mnt/sda/xjh/dataset/cell-data/20250725-xiangyu_vis/cellraw_4'
+    cell_list = ['0', 'A', 'B', 'C', 'D', 'F']
 
-    visualize(
-        img,
-        img_reg,
-        traj_data,
-        viz_dir=data_dir,
-        video_name='site_trajectory_visualization',
-        draw_mode='line&box',
-        trajectory_length=1000,
-        trajectory_thickness=2,
-        framerate=10,
-        using_tp=True,
-    )
+    for char in cell_list:
+        data_dir = join(root, f'cellraw_4-{char}')
+
+
+        # data_dir = '/mnt/sda/xjh/dataset/site-data/20250721-xiangyu_vis/cellraw_12250'
+        img = tiff.imread(join(data_dir, 'imgs_raw_mask.tif'))[0]
+        img_reg = tiff.imread(join(data_dir, 'imgs_raw_mask_reg_rcs.tif'))[0]
+        traj_data = {
+            0: pd.read_csv(join(data_dir, 'dataAnalysis_tj_0_withBg.csv')),
+        }
+
+        visualize(
+            img,
+            img_reg,
+            traj_data,
+            viz_dir=data_dir,
+            video_name='site_trajectory_visualization',
+            draw_mode='line&box',
+            trajectory_length=1000,
+            trajectory_thickness=2,
+            framerate=10,
+            using_tp=True,
+            add_reg_space=True
+        )
 
 if __name__ == "__main__":
     main()
