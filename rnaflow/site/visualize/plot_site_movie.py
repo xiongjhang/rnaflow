@@ -33,6 +33,7 @@ def create_colored_image(
         trajectory_thickness: int = 2,
         box_size: int = 8,
         box_thickness: int = 1,
+        using_tp: bool = None,
 ):
     """
     Creates an image with trajectories drawn on top of the input image.
@@ -41,8 +42,8 @@ def create_colored_image(
         img: np.ndarray
             The input image.
         trajectories: np.ndarray
-            3D array of shape (N, 3) where N is the length of the trajectory.
-            Each row contains the (x, y, t) coordinates of a trajectory point.
+            3D array of shape (N, 4) where N is the length of the trajectory.
+            Each row contains the (x, y, t, tp_flag) coordinates of a trajectory point.
         site_id: int
             The site ID for which the trajectory is being visualized.
         frame: int
@@ -60,6 +61,8 @@ def create_colored_image(
             Size of the boxes to draw around trajectory points.
         box_thickness: int
             Thickness of the box edges.
+        using_tp: bool
+            Whether to use the 'TP_Flag' column in the trajectory data to filter points.
 
     Returns:
         The colored image.
@@ -81,7 +84,7 @@ def create_colored_image(
 
         if draw_mode in ['box', 'line&box']:
             latest_pt = tuple(np.round(trajectories[-1]).astype(int))
-            if latest_pt[-1] == frame:
+            if using_tp == False or (using_tp == True and latest_pt[3] == 1):
                 top_left = (latest_pt[0] - box_size // 2, latest_pt[1] - box_size // 2)
                 bottom_right = (latest_pt[0] + box_size // 2, latest_pt[1] + box_size // 2)
                 cv2.rectangle(traj_layer, top_left, bottom_right, color, thickness=box_thickness)
@@ -210,21 +213,19 @@ def visualize(
                                     interpolation=cv2.INTER_LINEAR)
                 
             # Get trajectory up to current frame
-            if using_tp:
-                df_frame = df[(df.index <= t) & (df['TP_Flag'] == 1)].tail(max_trajectory_length)
-            else:
-                df_frame = df[df.index <= t].tail(max_trajectory_length)
+            df_frame = df[df.index <= t].tail(max_trajectory_length)
             
             if len(df_frame) > 0:
-                org_traj = (df_frame[['Org_X', 'Org_Y','POSITION_T']].values * resize_factor).astype(int)
-                reg_traj = (df_frame[['Reg_X', 'Reg_Y','POSITION_T']].values * resize_factor).astype(int)
+                org_traj = (df_frame[['Org_X', 'Org_Y','POSITION_T', 'TP_Flag']].fillna(0).values * resize_factor).astype(int)
+                reg_traj = (df_frame[['Reg_X', 'Reg_Y','POSITION_T', 'TP_Flag']].fillna(0).values * resize_factor).astype(int)
 
             viz_org = create_colored_image(
                 frame_org, org_traj, site_id,
                 frame=t, 
                 plot_frame=False,
                 alpha=alpha, draw_mode=draw_mode,
-                trajectory_thickness=base_trajectory_thickness
+                trajectory_thickness=base_trajectory_thickness,
+                using_tp=using_tp,
             )
             
             if add_reg_space:
@@ -233,7 +234,8 @@ def visualize(
                     frame=t, 
                     plot_frame=False,
                     alpha=alpha, draw_mode=draw_mode,
-                    trajectory_thickness=base_trajectory_thickness
+                    trajectory_thickness=base_trajectory_thickness,
+                    using_tp=using_tp,
                 )
 
             # Combine the visualized frames
@@ -268,7 +270,7 @@ def main():
             img_reg,
             traj_data,
             viz_dir=data_dir,
-            video_name='site_trajectory_visualization',
+            video_name='site_trajectory_visualization_'+char,
             draw_mode='line&box',
             trajectory_length=1000,
             trajectory_thickness=2,
